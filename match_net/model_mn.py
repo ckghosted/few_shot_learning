@@ -19,19 +19,24 @@ class MATCH_NET(object):
     def __init__(self,
                  sess,
                  model_name='MATCH_NET',
-                 result_path='test1',
+                 result_path='~/few_shot/matching_net/results',
                  x_dim=28,
                  y_dim=5,
                  n_samples_per_class=1,
+                 drawing_per_char=20,
                  bnDecay=0.9,
                  epsilon=1e-5,
                  tie=True):
         self.sess = sess
         self.model_name = model_name
         self.result_path = result_path
+        if not os.path.exists(self.result_path):
+            os.makedirs(self.result_path)
         self.x_dim = x_dim
         self.y_dim = y_dim
         self.n_samples_per_class = n_samples_per_class
+        print('Task: %d-way %d-shot' % (self.y_dim, self.n_samples_per_class))
+        self.drawing_per_char = drawing_per_char
         self.n_samples = self.y_dim * self.n_samples_per_class
         self.bnDecay = bnDecay
         self.epsilon = epsilon
@@ -74,6 +79,9 @@ class MATCH_NET(object):
         correct_prob = tf.reduce_sum(tf.log(tf.clip_by_value(label_prob, self.epsilon, 1.0)) * self.y_hat, 1)
         self.loss = tf.reduce_mean(-correct_prob, 0)
         self.train_op = tf.train.AdamOptimizer(learning_rate=self.learning_rate, beta1=0.5).minimize(self.loss)
+        
+        ## Create model saver (max_to_keep = 5 by default)
+        self.saver = tf.train.Saver()
     
     def conv_net(self, _input, scope, bn_train, reuse=False, stop_grad=False):
         with tf.variable_scope(scope) as varscope:
@@ -103,8 +111,7 @@ class MATCH_NET(object):
     def train(self,
               list_train,
               list_test,
-              drawing_per_char=20,
-              nEpochs=1e6,
+              n_iteration=1000000,
               bsize=32,
               learning_rate_start=1e-3,
               patience=10):
@@ -113,14 +120,16 @@ class MATCH_NET(object):
             print('WARNING: the folder "{}" already exists!'.format(os.path.join(self.result_path, self.model_name)))
         else:
             os.makedirs(os.path.join(self.result_path, self.model_name))
+            os.makedirs(os.path.join(self.result_path, self.model_name, 'outputs'))
+            os.makedirs(os.path.join(self.result_path, self.model_name, 'models'))
         
         ## initialization
         initOp = tf.global_variables_initializer()
         self.sess.run(initOp)
         
-        for epoch in range(1, (int(nEpochs)+1)):
+        for ite in range(1, (n_iteration+1)):
             mb_x_i, mb_y_i, mb_x_hat, mb_y_hat = self.get_minibatch(list_used=list_train,
-                                                                    drawing_per_char=drawing_per_char,
+                                                                    drawing_per_char=self.drawing_per_char,
                                                                     mb_dim=bsize)
             _, train_loss, train_acc = self.sess.run([self.train_op, self.loss, self.acc],
                                                feed_dict={self.bn_train: True,
@@ -129,25 +138,60 @@ class MATCH_NET(object):
                                                           self.y_i_ind: mb_y_i,
                                                           self.x_hat: mb_x_hat,
                                                           self.y_hat_ind: mb_y_hat})
-            if epoch % int(1e2) == 0:
+            if ite % 100 == 0:
                 mb_x_i, mb_y_i, mb_x_hat, mb_y_hat = self.get_minibatch(list_used=list_test,
-                                                                        drawing_per_char=drawing_per_char,
+                                                                        drawing_per_char=self.drawing_per_char,
                                                                         mb_dim=bsize)
-                test_loss, test_acc, x_hat_encode = self.sess.run([self.loss, self.acc, self.x_hat_encode],
+                test_loss, test_acc = self.sess.run([self.loss, self.acc],
                                                     feed_dict={self.bn_train: False,
                                                                self.x_i: mb_x_i,
                                                                self.y_i_ind: mb_y_i,
                                                                self.x_hat: mb_x_hat,
                                                                self.y_hat_ind: mb_y_hat})
                 #print('x_hat_encode.shape = %s' % (x_hat_encode.shape,))
-                print('epoch:', epoch,
-                      '| train_loss:', train_loss,
-                      '| train_acc:', train_acc,
-                      '| test_loss:', test_loss,
-                      '| test_acc:', test_acc)
+                print('ite: %d | train_loss: %.4f | train_acc: %.4f | test_loss: %.4f | test_acc: %.4f' %
+                      (ite, train_loss, train_acc, test_loss, test_acc))
+                
+                self.saver.save(self.sess,
+                                os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
+                                global_step=ite)
     
-    def inference(self):
-        pass
+    def inference(self,
+                  list_test,
+                  n_iteration=1000,
+                  gen_from=None,
+                  gen_from_ckpt=None,
+                  out_path=None,
+                  bsize=32,
+                  set_seed=1002):
+        ## create output folder
+        if gen_from is None:
+            gen_from = os.path.join(self.result_path, self.model_name, 'models')
+        if out_path is not None:
+            if os.path.exists(out_path):
+                print('WARNING: the output path "{}" already exists!'.format(out_path))
+            else:
+                os.makedirs(out_path)
+        else:
+            out_path = os.path.join(self.result_path, self.model_name)
+        
+        ## load previous model if possible
+        # print('gen_from: %s' % gen_from)
+        could_load, checkpoint_counter = self.load(gen_from, gen_from_ckpt)
+        if could_load:
+            test_acc_list = []
+            for _ in range(n_iteration):
+                mb_x_i, mb_y_i, mb_x_hat, mb_y_hat = self.get_minibatch(list_used=list_test,
+                                                                        drawing_per_char=self.drawing_per_char,
+                                                                        mb_dim=bsize)
+                test_acc = self.sess.run(self.acc,
+                                         feed_dict={self.bn_train: False,
+                                                    self.x_i: mb_x_i,
+                                                    self.y_i_ind: mb_y_i,
+                                                    self.x_hat: mb_x_hat,
+                                                    self.y_hat_ind: mb_y_hat})
+                test_acc_list.append(test_acc)
+            print('average test accuracy: %.4f' % np.mean(test_acc_list))
     
     def get_minibatch(self,
                       list_used,
@@ -178,5 +222,20 @@ class MATCH_NET(object):
                     mb_x_hat[i, :, :, 0] = np.rot90(cur_data, np.random.randint(4))
                     mb_y_hat[i] = j
         return mb_x_i, mb_y_i, mb_x_hat, mb_y_hat
+    
+    def load(self, init_from, init_from_ckpt=None):
+        ckpt = tf.train.get_checkpoint_state(init_from)
+        if ckpt and ckpt.model_checkpoint_path:
+            if init_from_ckpt is None:
+                ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+            else:
+                ckpt_name = init_from_ckpt
+            self.saver.restore(self.sess, os.path.join(init_from, ckpt_name))
+            counter = int(next(re.finditer("(\d+)(?!.*\d)",ckpt_name)).group(0))
+            print(" [*] Success to read {}".format(ckpt_name))
+            return True, counter
+        else:
+            print(" [*] Failed to find a checkpoint")
+            return False, 0
     
     
