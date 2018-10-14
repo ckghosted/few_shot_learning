@@ -16,7 +16,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', type=str, help='Path of train_novel, train_base, and test_novel, and test_base')
     parser.add_argument('--result_path', type=str, help='Path to save all results')
-    parser.add_argument('--extractor_name', type=str, help='Folder name used to save extractor models and learning curves')
+    parser.add_argument('--extractor_name', type=str, help='Folder name to save extractor models and learning curves')
     parser.add_argument('--vgg16_npy_path', type=str, help='Path of the VGG16 pre-trained weights: vgg16.npy')
     parser.add_argument('--n_base_classes', default=80, type=int, help='Number of the base classes')
     parser.add_argument('--n_top', default=5, type=int, help='Number to compute the top-n accuracy')

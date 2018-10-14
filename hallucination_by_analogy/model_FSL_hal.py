@@ -52,9 +52,10 @@ class HAL(object):
         self.keep_prob = tf.placeholder(tf.float32, shape=[], name='keep_prob')
         self.learning_rate = tf.placeholder(tf.float32, shape=[], name='learning_rate')
         
+        ### Used the classifier on the base classes learnt during representation learning
+        ### to compute the classification loss of hallucinated features.
         self.bn_dense14 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='bn_dense14')
         self.bn_dense15 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='bn_dense15')
-        
         print("build model started")
         self.hallucinated_features = self.build_hallucinator(self.triplet_features)
         self.logits = self.build_mlp(self.hallucinated_features)
@@ -65,7 +66,7 @@ class HAL(object):
                                                                                logits=self.logits))
         self.loss = self.loss_lambda * self.loss_mse + self.loss_cls
         
-        #### variables
+        ### variables
         self.all_vars = tf.global_variables()
         self.all_vars_hal = [var for var in self.all_vars if 'hal' in var.name]
         self.all_vars_mlp = [var for var in self.all_vars if 'mlp' in var.name]
@@ -73,20 +74,20 @@ class HAL(object):
         self.trainable_vars_hal = [var for var in self.trainable_vars if 'hal' in var.name]
         self.trainable_vars_mlp = [var for var in self.trainable_vars if 'mlp' in var.name]
         
-        #### regularizers
+        ### regularizers
         self.all_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         self.used_regs = [reg for reg in self.all_regs if \
                           ('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name)]
         self.used_regs_hal = [reg for reg in self.all_regs if \
                               ('hal' in reg.name) and (('Matrix' in reg.name) or ('bias' in reg.name))]
         
-        #### optimizers
+        ### optimizers
         self.opt_hal = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
                                               beta1=0.5).minimize(self.loss+sum(self.used_regs_hal),
                                                                   var_list=self.trainable_vars_hal)
-        self.opt_all = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
-                                              beta1=0.5).minimize(self.loss+sum(self.used_regs),
-                                                                  var_list=self.trainable_vars)
+        #self.opt_all = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+        #                                      beta1=0.5).minimize(self.loss+sum(self.used_regs),
+        #                                                          var_list=self.trainable_vars)
         
         ### Create model saver (keep the best 3 checkpoint)
         self.saver = tf.train.Saver(max_to_keep = 3)
@@ -151,13 +152,13 @@ class HAL(object):
         target_feature_valid = train_dict[b'target_features'][int(data_len*0.8):int(data_len)]
         nBatches = int(np.ceil(triplet_feature_train.shape[0] / bsize))
         nBatches_valid = int(np.ceil(triplet_feature_valid.shape[0] / bsize))
-        #### one-hot, but need to consider the following error first:
-        #### "IndexError: index 86 is out of bounds for axis 0 with size 80"
-        #### Make a dictionary for {old_label: new_label} mapping, e.g., {0:0, 3:1, 5:2, 6:3, 7:4, ..., 99:79}
-        #### such that all labels become 0~79
+        ### one-hot, but need to consider the following error first:
+        ### "IndexError: index 86 is out of bounds for axis 0 with size 80"
+        ### Make a dictionary for {old_label: new_label} mapping, e.g., {0:0, 3:1, 5:2, 6:3, 7:4, ..., 99:79}
+        ### such that all labels become 0~79
         label_mapping = {}
-        #### [NOTE] Use fine_labels in train_base_dict to define label_mapping, since
-        ####        some of base labels may not exist in the training data for hallucinator!
+        ### [NOTE] Use fine_labels in train_base_dict to define label_mapping, since
+        ###        some of base labels may not exist in the training data for hallucinator!
         train_base_dict = unpickle(train_base_path)
         for new_lb in range(self.n_fine_class):
             label_mapping[np.sort(list(set(train_base_dict[b'fine_labels'])))[new_lb]] = new_lb
@@ -171,11 +172,11 @@ class HAL(object):
         ### Data indexes used to shuffle training order
         arr = np.arange(triplet_feature_train.shape[0])
     
-        ## initialization
+        ### initialization
         initOp = tf.global_variables_initializer()
         self.sess.run(initOp)
         
-        ## load previously-trained linear classifier
+        ### load previously-trained linear classifier
         if init_from is not None:
             could_load, checkpoint_counter = self.load_mlp(init_from)
             if could_load:
@@ -185,7 +186,7 @@ class HAL(object):
         else:
             print(" [@] train from scratch")
         
-        ## main training loop
+        ### main training loop
         loss_train = []
         loss_valid = []
         best_loss = 0
@@ -193,7 +194,7 @@ class HAL(object):
         for epoch in range(1, (num_epoch+1)):
             loss_train_batch = []
             loss_valid_batch = []
-            ### shuffle training order for each epoch
+            #### shuffle training order for each epoch
             np.random.shuffle(arr)
             #print('training')
             for idx in tqdm.tqdm(range(nBatches)):
@@ -209,7 +210,7 @@ class HAL(object):
                                                    self.keep_prob: 0.5,
                                                    self.learning_rate: learning_rate})
                 loss_train_batch.append(loss)
-            ### compute validation loss
+            #### compute validation loss
             #print('validation')
             for idx in tqdm.tqdm(range(nBatches_valid)):
                 batch_triplet_feature = triplet_feature_valid[idx*bsize:(idx+1)*bsize]
@@ -223,13 +224,13 @@ class HAL(object):
                                                 self.bn_train: False,
                                                 self.keep_prob: 1.0,})
                 loss_valid_batch.append(loss)
-            ### record training loss for each epoch (instead of each iteration)
+            #### record training loss for each epoch (instead of each iteration)
             loss_train.append(np.mean(loss_train_batch))
             loss_valid.append(np.mean(loss_valid_batch))
             print('Epoch: %d, train loss: %f, valid loss: %f' % \
                   (epoch, np.mean(loss_train_batch), np.mean(loss_valid_batch)))
             
-            ### save model if improvement, stop if reach patience
+            #### save model if improvement, stop if reach patience
             current_loss = np.mean(loss_valid_batch)
             if epoch == 1:
                 best_loss = current_loss
@@ -299,19 +300,25 @@ class FSL(object):
         self.keep_prob = tf.placeholder(tf.float32, shape=[], name='keep_prob')
         self.learning_rate = tf.placeholder(tf.float32, shape=[], name='learning_rate')
         
-        ## The classifier is implemented as a simple 3-layer MLP with batch normalization.
-        ## For convenience, it uses the same structure (and variable names) as used in the VGG feature extractor.
-        ## But it can be re-designed.
+        ### Used the classifier on the base classes learnt during representation learning
+        ### to compute the probability of the correct fine_label of hallucinated features.
         self.bn_dense14 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='bn_dense14')
         self.bn_dense15 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='bn_dense15')
+        ### The classifier is implemented as a simple 3-layer MLP with batch normalization.
+        ### Just like the one used in the VGG feature extractor. But it can be re-designed.
+        self.bn_dense14_ = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='bn_dense14_')
+        self.bn_dense15_ = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='bn_dense15_')
         print("build model started")
-        self.logits = self.build_mlp(self.features)
-        print("build model finished, define loss and optimizer")
-        
-        ## Also build the hallucinator.
-        ## No need to define loss or optimizer since we only need foward-pass
+        self.logits = self.build_fsl_classifier(self.features)
+        ### Also build the mlp.
+        ### No need to define loss or optimizer since we only need foward-pass
+        self.features_temp = tf.placeholder(tf.float32, shape=[None]+[self.fc_dim], name='features_temp')
+        self.logits_temp = self.build_mlp(self.features_temp)
+        ### Also build the hallucinator.
+        ### No need to define loss or optimizer since we only need foward-pass
         self.triplet_features = tf.placeholder(tf.float32, shape=[None]+[self.fc_dim*3], name='triplet_features')
         self.hallucinated_features = self.build_hallucinator(self.triplet_features)
+        print("build model finished, define loss and optimizer")
         
         ### Compute accuracy (optional)
         #self.outputs = tf.nn.softmax(self.dense16) ## [-1,self.n_fine_class]
@@ -323,25 +330,25 @@ class FSL(object):
                                                                            logits=self.logits,
                                                                            name='loss'))
         
-        #### variables
+        ### variables
         self.all_vars = tf.global_variables()
         self.all_vars_hal = [var for var in self.all_vars if 'hal' in var.name]
-        self.all_vars_mlp = [var for var in self.all_vars if 'mlp' in var.name]
+        self.all_vars_fsl_cls = [var for var in self.all_vars if 'fsl_cls' in var.name]
         self.trainable_vars = tf.trainable_variables()
         self.trainable_vars_hal = [var for var in self.trainable_vars if 'hal' in var.name]
-        self.trainable_vars_mlp = [var for var in self.trainable_vars if 'mlp' in var.name]
+        self.trainable_vars_fsl_cls = [var for var in self.trainable_vars if 'fsl_cls' in var.name]
         
-        #### regularizers
+        ### regularizers
         self.all_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         self.used_regs = [reg for reg in self.all_regs if \
                           ('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name)]
-        self.used_regs_mlp = [reg for reg in self.all_regs if \
-                              ('mlp' in reg.name) and (('Matrix' in reg.name) or ('bias' in reg.name))]
+        self.used_regs_fsl_cls = [reg for reg in self.all_regs if \
+                                  ('fsl_cls' in reg.name) and (('Matrix' in reg.name) or ('bias' in reg.name))]
         
-        #### optimizers
-        self.opt_mlp = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
-                                              beta1=0.5).minimize(self.loss+sum(self.used_regs_mlp),
-                                                                  var_list=self.trainable_vars_mlp)
+        ### optimizers
+        self.opt_fsl_cls = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                  beta1=0.5).minimize(self.loss+sum(self.used_regs_fsl_cls),
+                                                                      var_list=self.trainable_vars_fsl_cls)
         #self.opt_all = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
         #                                      beta1=0.5).minimize(self.loss+sum(self.used_regs),
         #                                                          var_list=self.trainable_vars)
@@ -350,11 +357,12 @@ class FSL(object):
         self.saver = tf.train.Saver(max_to_keep = 3)
         self.saver_hal = tf.train.Saver(var_list = self.all_vars_hal,
                                         max_to_keep = 3)
+        self.saver_mlp = tf.train.Saver(var_list = self.all_vars_mlp,
+                                        max_to_keep = 3)
         return [self.all_vars, self.trainable_vars, self.all_regs]
     
-    ## The classifier is implemented as a simple 3-layer MLP with batch normalization.
-    ## For convenience, it uses the same structure (and variable names) as used in the VGG feature extractor.
-    ## But it can be re-designed.
+    ## Used the classifier on the base classes learnt during representation learning
+    ## to compute the probability of the correct fine_label of hallucinated features.
     def build_mlp(self, input_):
         with tf.variable_scope('mlp', regularizer=l2_regularizer(self.l2scale)):
             ### Layer 14: dense with self.fc_dim neurons, BN, and ReLU
@@ -367,6 +375,20 @@ class FSL(object):
             self.dense16 = linear(self.relu15, self.n_fine_class, add_bias=True, name='dense16') ## [-1,self.n_fine_class]
         return self.dense16
     
+    ## The classifier is implemented as a simple 3-layer MLP with batch normalization.
+    ## Just like the one used in the VGG feature extractor. But it can be re-designed.
+    def build_fsl_classifier(self, input_):
+        with tf.variable_scope('fsl_cls', regularizer=l2_regularizer(self.l2scale)):
+            ### Layer 14: dense with self.fc_dim neurons, BN, and ReLU
+            self.dense14_ = self.bn_dense14_(linear(input_, self.fc_dim, name='dense14_'), train=self.bn_train) ## [-1,self.fc_dim]
+            self.relu14_ = tf.nn.relu(self.dense14_, name='relu14_')
+            ### Layer 15: dense with self.fc_dim neurons, BN, and ReLU
+            self.dense15_ = self.bn_dense15_(linear(self.relu14_, self.fc_dim, name='dense15_'), train=self.bn_train) ## [-1,self.fc_dim]
+            self.relu15_ = tf.nn.relu(self.dense15_, name='relu15_')
+            ### Layer 16: dense with self.n_fine_class neurons, softmax
+            self.dense16_ = linear(self.relu15_, self.n_fine_class, add_bias=True, name='dense16_') ## [-1,self.n_fine_class]
+        return self.dense16_
+
     ## "For our generator G, we use a three layer MLP with ReLU as the activation function" (Hariharan, 2017)
     def build_hallucinator(self, input_):
         with tf.variable_scope('hal', regularizer=l2_regularizer(self.l2scale)):
@@ -381,58 +403,56 @@ class FSL(object):
             self.relu3 = tf.nn.relu(self.dense3, name='relu3')
         return self.relu3
     
-    def hallucinate(self, seed_feature, n_samples_needed):
-        return np.repeat(seed_feature, np.repeat(n_min, input_.shape[0]), axis=0)
-    
     def hallucinate(self,
                     seed_feature,
                     n_samples_needed,
-                    train_base_path,
-                    gen_from,
-                    gen_from_ckpt=None):
-        ## load previous trained hallucinator
-        could_load, checkpoint_counter = self.load_hal(gen_from, gen_from_ckpt)
-        if could_load:
-            #print(" [***] Hallucinator Load SUCCESS")
-            
-            ### Load training features and labels of the base classes
-            ### (Take the first 80% since the rest are used for validation in the train() function)
-            train_base_dict = unpickle(train_base_path)
-            features_len = len(train_base_dict[b'fine_labels'])
-            features_base_train = train_base_dict[b'features'][0:int(features_len*0.8)]
-            fine_labels = [int(s) for s in train_base_dict[b'fine_labels'][0:int(features_len*0.8)]]
-            labels_base_train = np.eye(self.n_fine_class)[fine_labels]
-            
-            ### Create a batch of size "n_samples_needed", with each row being consisted of
-            ### (base_feature1, base_feature2, seed_feature), where base_feature1 and base_feature2
-            ### are randomly selected from the same base class.
-            input_features = np.empty([n_samples_needed, int(self.fc_dim*3)])
-            all_possible_base_lbs = list(set(np.argmax(labels_base_train, axis=1)))
-            for sample_count in range(n_samples_needed):
-                #### (1) Randomly select a base class
-                lb = np.random.choice(all_possible_base_lbs, 1)
-                #### (2) Randomly select two samples from the above base class
-                candidate_indexes = [idx for idx in range(labels_base_train.shape[0]) if np.argmax(labels_base_train[idx]) == lb]
-                selected_indexes = np.random.choice(candidate_indexes, 2)
-                #### (3) Concatenate (base_feature1, base_feature2, seed_feature) to form a row of the model input
-                ####     Note that seed_feature has shape (1, fc_dim) already ==> no need np.expand_dims()
-                input_features[sample_count,:] = np.concatenate((np.expand_dims(features_base_train[selected_indexes[0]], 0),
-                                                                 np.expand_dims(features_base_train[selected_indexes[1]], 0),
-                                                                 seed_feature), axis=1)
-            
-            ### Forward-pass
-            features_hallucinated = self.sess.run(self.hallucinated_features,
-                                                  feed_dict={self.triplet_features: input_features})
-            return features_hallucinated
-        else:
-            #print(" [***] Hallucinator Load FAIL, just repeat the seed_feature")
-            return np.repeat(seed_feature, n_samples_needed, axis=0)
+                    train_base_path):
+        #print(" [***] Hallucinator Load SUCCESS")
+        ### Load training features and labels of the base classes
+        ### (Take the first 80% since the rest are used for validation in the train() function)
+        train_base_dict = unpickle(train_base_path)
+        features_len = len(train_base_dict[b'fine_labels'])
+        features_base_train = train_base_dict[b'features'][0:int(features_len*0.8)]
+        fine_labels = [int(s) for s in train_base_dict[b'fine_labels'][0:int(features_len*0.8)]]
+        labels_base_train = np.eye(self.n_fine_class)[fine_labels]
+        
+        ### Create a batch of size "n_samples_needed", with each row being consisted of
+        ### (base_feature1, base_feature2, seed_feature), where base_feature1 and base_feature2
+        ### are randomly selected from the same base class.
+        input_features = np.empty([n_samples_needed, int(self.fc_dim*3)])
+        all_possible_base_lbs = list(set(np.argmax(labels_base_train, axis=1)))
+        for sample_count in range(n_samples_needed):
+            #### (1) Randomly select a base class
+            lb = np.random.choice(all_possible_base_lbs, 1)
+            #### (2) Randomly select two samples from the above base class
+            candidate_indexes = [idx for idx in range(labels_base_train.shape[0]) if np.argmax(labels_base_train[idx]) == lb]
+            selected_indexes = np.random.choice(candidate_indexes, 2)
+            #### (3) Concatenate (base_feature1, base_feature2, seed_feature) to form a row of the model input
+            ####     Note that seed_feature has shape (1, fc_dim) already ==> no need np.expand_dims()
+            input_features[sample_count,:] = np.concatenate((np.expand_dims(features_base_train[selected_indexes[0]], 0),
+                                                             np.expand_dims(features_base_train[selected_indexes[1]], 0),
+                                                             seed_feature), axis=1)
+        
+        ### Forward-pass
+        features_hallucinated = self.sess.run(self.hallucinated_features,
+                                              feed_dict={self.triplet_features: input_features})
+        ### Choose the hallucinated features with high probability of the correct fine_label
+        self.logits_temp = self.build_mlp(self.features_temp)
+        logits_hallucinated = self.sess.run(self.logits_temp,
+                                            feed_dict={self.features_temp: features_hallucinated})
+        print('logits_hallucinated.shape: %s' % (logits_hallucinated.shape,))
+        return features_hallucinated
+    else:
+        #print(" [***] Hallucinator Load FAIL, just repeat the seed_feature")
+        return np.repeat(seed_feature, n_samples_needed, axis=0)
     
     def train(self,
               train_novel_path, ## train_novel_feat path (must be specified!)
               train_base_path, ## train_base_feat path (must be specified!)
-              gen_from=None, ## e.g., hal_name (must given)
-              gen_from_ckpt=None, ## e.g., hal_name+'.model-1680' (can be None)
+              hal_from, ## e.g., hal_name (must given)
+              mlp_from, ## e.g., mlp_name (must given)
+              hal_from_ckpt=None, ## e.g., hal_name+'.model-1680' (can be None)
+              mlp_from_ckpt=None, ## e.g., mlp_name+'.model-1680' (can be None)
               n_shot=1,
               n_min=20, ## minimum number of samples per training class ==> (n_min - n_shot) more samples need to be hallucinated
               n_top=5, ## top-n accuracy
@@ -466,6 +486,10 @@ class FSL(object):
         fine_labels = [int(s) for s in train_base_dict[b'fine_labels'][int(features_len*0.8):int(features_len)]]
         labels_base_valid = np.eye(self.n_fine_class)[fine_labels]
         
+        ## load previous trained hallucinator
+        could_load, checkpoint_counter = self.load_hal(hal_from, hal_from_ckpt)
+        could_load, checkpoint_counter = self.load_mlp(mlp_from, mlp_from_ckpt)
+
         ### For the training split, use all base samples and randomly selected novel samples.
         if n_shot >= n_min:
             #### Hallucination not needed
@@ -496,9 +520,7 @@ class FSL(object):
                 ##### (3) Collect (n_shot) selected features and (n_min - n_shot) hallucinated features
                 feature_hallucinated = self.hallucinate(seed_feature=seed_feature,
                                                         n_samples_needed=n_min-n_shot,
-                                                        train_base_path=train_base_path,
-                                                        gen_from=gen_from,
-                                                        gen_from_ckpt=gen_from_ckpt)
+                                                        train_base_path=train_base_path)
                 #print('feature_hallucinated.shape: %s' % (feature_hallucinated.shape,))
                 features_novel_final[lb_counter*n_min:(lb_counter+1)*n_min,:] = \
                     np.concatenate((selected_features_per_lb, feature_hallucinated), axis=0)
@@ -695,6 +717,21 @@ class FSL(object):
             else:
                 ckpt_name = init_from_ckpt
             self.saver_hal.restore(self.sess, os.path.join(init_from, ckpt_name))
+            counter = int(next(re.finditer("(\d+)(?!.*\d)",ckpt_name)).group(0))
+            print(" [*] Success to read {}".format(ckpt_name))
+            return True, counter
+        else:
+            print(" [*] Failed to find a checkpoint")
+            return False, 0
+    
+    def load_mlp(self, init_from, init_from_ckpt=None):
+        ckpt = tf.train.get_checkpoint_state(init_from)
+        if ckpt and ckpt.model_checkpoint_path:
+            if init_from_ckpt is None:
+                ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+            else:
+                ckpt_name = init_from_ckpt
+            self.saver_mlp.restore(self.sess, os.path.join(init_from, ckpt_name))
             counter = int(next(re.finditer("(\d+)(?!.*\d)",ckpt_name)).group(0))
             print(" [*] Success to read {}".format(ckpt_name))
             return True, counter

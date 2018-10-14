@@ -15,7 +15,7 @@ warnings.simplefilter('ignore')
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--result_path', type=str, help='Path to save all results')
-    parser.add_argument('--model_name', type=str, help='Folder name used to save FSL models and learning curves')
+    parser.add_argument('--model_name', type=str, help='Folder name to save FSL models and learning curves')
     parser.add_argument('--extractor_name', type=str, help='Folder name of the saved extractor model')
     parser.add_argument('--hallucinator_name', type=str, help='Folder name of the saved hallucinator model')
     parser.add_argument('--n_fine_classes', default=100, type=int, help='Number of classes (base + novel)')
@@ -46,7 +46,8 @@ def train(args):
         all_vars, trainable_vars, all_regs = net.build_model()
         res = net.train(train_novel_path=os.path.join(args.result_path, args.extractor_name, 'train_novel_feat'),
                         train_base_path=os.path.join(args.result_path, args.extractor_name, 'train_base_feat'),
-                        gen_from=os.path.join(args.result_path, args.hallucinator_name, 'models_hal'),
+                        hal_from=os.path.join(args.result_path, args.hallucinator_name, 'models_hal'),
+                        mlp_from=os.path.join(args.result_path, args.extractor_name, 'models'),
                         n_shot=args.n_shot,
                         n_min=args.n_min,
                         n_top=args.n_top,
