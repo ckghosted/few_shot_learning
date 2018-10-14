@@ -486,149 +486,151 @@ class FSL(object):
         fine_labels = [int(s) for s in train_base_dict[b'fine_labels'][int(features_len*0.8):int(features_len)]]
         labels_base_valid = np.eye(self.n_fine_class)[fine_labels]
         
-        ## load previous trained hallucinator
-        could_load, checkpoint_counter = self.load_hal(hal_from, hal_from_ckpt)
-        could_load, checkpoint_counter = self.load_mlp(mlp_from, mlp_from_ckpt)
-
-        ### For the training split, use all base samples and randomly selected novel samples.
-        if n_shot >= n_min:
-            #### Hallucination not needed
-            selected_indexes = []
-            for lb in set(np.argmax(labels_novel_train, axis=1)):
-                ##### Randomly select n-shot features from each class
-                candidate_indexes_per_lb = [idx for idx in range(labels_novel_train.shape[0]) \
-                                            if np.argmax(labels_novel_train[idx]) == lb]
-                selected_indexes_per_lb = np.random.choice(candidate_indexes_per_lb, n_shot)
-                selected_indexes.extend(selected_indexes_per_lb)
-            features_novel_final = features_novel_train[selected_indexes]
-            labels_novel_final = labels_novel_train[selected_indexes]
+        ## load previous trained hallucinator and mlp linear classifier
+        could_load_hal, checkpoint_counter_hal = self.load_hal(hal_from, hal_from_ckpt)
+        could_load_mlp, checkpoint_counter_mlp = self.load_mlp(mlp_from, mlp_from_ckpt)
+        if not (could_load_hal and could_load_mlp):
+            print('Load hallucinator or mlp linear classifier fail!!!!!!')
         else:
-            #### Hallucination needed
-            n_features_novel_final = int(n_min * len(set(np.argmax(labels_novel_train, axis=1))))
-            features_novel_final = np.empty([n_features_novel_final, self.fc_dim])
-            labels_novel_final = np.empty([n_features_novel_final, self.n_fine_class])
-            lb_counter = 0
-            for lb in set(np.argmax(labels_novel_train, axis=1)):
-                ##### (1) Randomly select n-shot features from each class
-                candidate_indexes_per_lb = [idx for idx in range(labels_novel_train.shape[0]) \
-                                            if np.argmax(labels_novel_train[idx]) == lb]
-                selected_indexes_per_lb = np.random.choice(candidate_indexes_per_lb, n_shot)
-                selected_features_per_lb = features_novel_train[selected_indexes_per_lb]
-                ##### (2) Randomly select a seed feature (from the above n-shot samples) for hallucination
-                seed_index = np.random.choice(selected_indexes_per_lb, 1)
-                seed_feature = features_novel_train[seed_index]
-                ##### (3) Collect (n_shot) selected features and (n_min - n_shot) hallucinated features
-                feature_hallucinated = self.hallucinate(seed_feature=seed_feature,
-                                                        n_samples_needed=n_min-n_shot,
-                                                        train_base_path=train_base_path)
-                #print('feature_hallucinated.shape: %s' % (feature_hallucinated.shape,))
-                features_novel_final[lb_counter*n_min:(lb_counter+1)*n_min,:] = \
-                    np.concatenate((selected_features_per_lb, feature_hallucinated), axis=0)
-                labels_novel_final[lb_counter*n_min:(lb_counter+1)*n_min,:] = np.eye(self.n_fine_class)[np.repeat(lb, n_min)]
-                lb_counter += 1
-        features_train = np.concatenate((features_novel_final, features_base_train), axis=0)
-        print('features_train.shape: %s' % (features_train.shape,))
-        fine_labels_train = np.concatenate((labels_novel_final, labels_base_train), axis=0)
-        nBatches = int(np.ceil(features_train.shape[0] / bsize))
-        
-        ### For the validation split, just combine all base samples and all novel samples
-        features_valid = np.concatenate((features_novel_valid, features_base_valid), axis=0)
-        fine_labels_valid = np.concatenate((labels_novel_valid, labels_base_valid), axis=0)
-        nBatches_valid = int(np.ceil(features_valid.shape[0] / bsize))
-        
-        ### Features indexes used to shuffle training order
-        arr = np.arange(features_train.shape[0])
-        
-        ## initialization
-        initOp = tf.global_variables_initializer()
-        self.sess.run(initOp)
-        
-        ## main training loop
-        loss_train = []
-        loss_valid = []
-        acc_train = []
-        acc_valid = []
-        top_n_acc_train = []
-        top_n_acc_valid = []
-        best_loss = 0
-        stopping_step = 0
-        for epoch in range(1, (num_epoch+1)):
-            loss_train_batch = []
-            loss_valid_batch = []
-            acc_train_batch = []
-            acc_valid_batch = []
-            top_n_acc_train_batch = []
-            top_n_acc_valid_batch = []
-            ### shuffle training order for each epoch
-            np.random.shuffle(arr)
-            #print('training')
-            for idx in tqdm.tqdm(range(nBatches)):
-                batch_features = features_train[arr[idx*bsize:(idx+1)*bsize]]
-                batch_labels = fine_labels_train[arr[idx*bsize:(idx+1)*bsize]]
-                #print(batch_labels.shape)
-                _, loss, logits = self.sess.run([self.opt_mlp, self.loss, self.dense16],
-                                                feed_dict={self.features: batch_features,
-                                                           self.fine_labels: batch_labels,
-                                                           self.bn_train: True,
-                                                           self.keep_prob: 0.5,
-                                                           self.learning_rate: learning_rate})
-                loss_train_batch.append(loss)
-                y_true = np.argmax(batch_labels, axis=1)
-                y_pred = np.argmax(logits, axis=1)
-                acc_train_batch.append(accuracy_score(y_true, y_pred))
-                best_n = np.argsort(logits, axis=1)[:,-n_top:]
-                top_n_acc_train_batch.append(np.mean([(y_true[batch_idx] in best_n[batch_idx]) for batch_idx in range(len(y_true))]))
-            ### compute validation loss
-            #print('validation')
-            for idx in tqdm.tqdm(range(nBatches_valid)):
-                batch_features = features_valid[idx*bsize:(idx+1)*bsize]
-                batch_labels = fine_labels_valid[idx*bsize:(idx+1)*bsize]
-                #print(batch_labels.shape)
-                loss, logits = self.sess.run([self.loss, self.dense16],
-                                             feed_dict={self.features: batch_features,
-                                                        self.fine_labels: batch_labels,
-                                                        self.bn_train: False,
-                                                        self.keep_prob: 1.0,})
-                loss_valid_batch.append(loss)
-                y_true = np.argmax(batch_labels, axis=1)
-                y_pred = np.argmax(logits, axis=1)
-                acc_valid_batch.append(accuracy_score(y_true, y_pred))
-                best_n = np.argsort(logits, axis=1)[:,-n_top:]
-                top_n_acc_valid_batch.append(np.mean([(y_true[batch_idx] in best_n[batch_idx]) for batch_idx in range(len(y_true))]))
-            ### record training loss for each epoch (instead of each iteration)
-            loss_train.append(np.mean(loss_train_batch))
-            loss_valid.append(np.mean(loss_valid_batch))
-            acc_train.append(np.mean(acc_train_batch))
-            acc_valid.append(np.mean(acc_valid_batch))
-            top_n_acc_train.append(np.mean(top_n_acc_train_batch))
-            top_n_acc_valid.append(np.mean(top_n_acc_valid_batch))
-            print('Epoch: %d, train loss: %f, valid loss: %f, train accuracy: %f, valid accuracy: %f' % \
-                  (epoch, np.mean(loss_train_batch), np.mean(loss_valid_batch), np.mean(acc_train_batch), np.mean(acc_valid_batch)))
-            print('           top-%d train accuracy: %f, top-%d valid accuracy: %f' % \
-                  (n_top, np.mean(top_n_acc_train_batch), n_top, np.mean(top_n_acc_valid_batch)))
-            
-            ### save model if improvement, stop if reach patience
-            current_loss = np.mean(loss_valid_batch)
-            current_acc = np.mean(acc_valid_batch)
-            if epoch == 1:
-                best_loss = current_loss
-                best_acc = current_acc
+            ### For the training split, use all base samples and randomly selected novel samples.
+            if n_shot >= n_min:
+                #### Hallucination not needed
+                selected_indexes = []
+                for lb in set(np.argmax(labels_novel_train, axis=1)):
+                    ##### Randomly select n-shot features from each class
+                    candidate_indexes_per_lb = [idx for idx in range(labels_novel_train.shape[0]) \
+                                                if np.argmax(labels_novel_train[idx]) == lb]
+                    selected_indexes_per_lb = np.random.choice(candidate_indexes_per_lb, n_shot)
+                    selected_indexes.extend(selected_indexes_per_lb)
+                features_novel_final = features_novel_train[selected_indexes]
+                labels_novel_final = labels_novel_train[selected_indexes]
             else:
-                #if current_loss < best_loss or current_acc > best_acc:
-                if current_loss < best_loss: ## only monitor loss
+                #### Hallucination needed
+                n_features_novel_final = int(n_min * len(set(np.argmax(labels_novel_train, axis=1))))
+                features_novel_final = np.empty([n_features_novel_final, self.fc_dim])
+                labels_novel_final = np.empty([n_features_novel_final, self.n_fine_class])
+                lb_counter = 0
+                for lb in set(np.argmax(labels_novel_train, axis=1)):
+                    ##### (1) Randomly select n-shot features from each class
+                    candidate_indexes_per_lb = [idx for idx in range(labels_novel_train.shape[0]) \
+                                                if np.argmax(labels_novel_train[idx]) == lb]
+                    selected_indexes_per_lb = np.random.choice(candidate_indexes_per_lb, n_shot)
+                    selected_features_per_lb = features_novel_train[selected_indexes_per_lb]
+                    ##### (2) Randomly select a seed feature (from the above n-shot samples) for hallucination
+                    seed_index = np.random.choice(selected_indexes_per_lb, 1)
+                    seed_feature = features_novel_train[seed_index]
+                    ##### (3) Collect (n_shot) selected features and (n_min - n_shot) hallucinated features
+                    feature_hallucinated = self.hallucinate(seed_feature=seed_feature,
+                                                            n_samples_needed=n_min-n_shot,
+                                                            train_base_path=train_base_path)
+                    #print('feature_hallucinated.shape: %s' % (feature_hallucinated.shape,))
+                    features_novel_final[lb_counter*n_min:(lb_counter+1)*n_min,:] = \
+                        np.concatenate((selected_features_per_lb, feature_hallucinated), axis=0)
+                    labels_novel_final[lb_counter*n_min:(lb_counter+1)*n_min,:] = np.eye(self.n_fine_class)[np.repeat(lb, n_min)]
+                    lb_counter += 1
+            features_train = np.concatenate((features_novel_final, features_base_train), axis=0)
+            print('features_train.shape: %s' % (features_train.shape,))
+            fine_labels_train = np.concatenate((labels_novel_final, labels_base_train), axis=0)
+            nBatches = int(np.ceil(features_train.shape[0] / bsize))
+            
+            ### For the validation split, just combine all base samples and all novel samples
+            features_valid = np.concatenate((features_novel_valid, features_base_valid), axis=0)
+            fine_labels_valid = np.concatenate((labels_novel_valid, labels_base_valid), axis=0)
+            nBatches_valid = int(np.ceil(features_valid.shape[0] / bsize))
+            
+            ### Features indexes used to shuffle training order
+            arr = np.arange(features_train.shape[0])
+            
+            ## initialization
+            initOp = tf.global_variables_initializer()
+            self.sess.run(initOp)
+            
+            ## main training loop
+            loss_train = []
+            loss_valid = []
+            acc_train = []
+            acc_valid = []
+            top_n_acc_train = []
+            top_n_acc_valid = []
+            best_loss = 0
+            stopping_step = 0
+            for epoch in range(1, (num_epoch+1)):
+                loss_train_batch = []
+                loss_valid_batch = []
+                acc_train_batch = []
+                acc_valid_batch = []
+                top_n_acc_train_batch = []
+                top_n_acc_valid_batch = []
+                ### shuffle training order for each epoch
+                np.random.shuffle(arr)
+                #print('training')
+                for idx in tqdm.tqdm(range(nBatches)):
+                    batch_features = features_train[arr[idx*bsize:(idx+1)*bsize]]
+                    batch_labels = fine_labels_train[arr[idx*bsize:(idx+1)*bsize]]
+                    #print(batch_labels.shape)
+                    _, loss, logits = self.sess.run([self.opt_fsl_cls, self.loss, self.logits],
+                                                    feed_dict={self.features: batch_features,
+                                                               self.fine_labels: batch_labels,
+                                                               self.bn_train: True,
+                                                               self.keep_prob: 0.5,
+                                                               self.learning_rate: learning_rate})
+                    loss_train_batch.append(loss)
+                    y_true = np.argmax(batch_labels, axis=1)
+                    y_pred = np.argmax(logits, axis=1)
+                    acc_train_batch.append(accuracy_score(y_true, y_pred))
+                    best_n = np.argsort(logits, axis=1)[:,-n_top:]
+                    top_n_acc_train_batch.append(np.mean([(y_true[batch_idx] in best_n[batch_idx]) for batch_idx in range(len(y_true))]))
+                ### compute validation loss
+                #print('validation')
+                for idx in tqdm.tqdm(range(nBatches_valid)):
+                    batch_features = features_valid[idx*bsize:(idx+1)*bsize]
+                    batch_labels = fine_labels_valid[idx*bsize:(idx+1)*bsize]
+                    #print(batch_labels.shape)
+                    loss, logits = self.sess.run([self.loss, self.logits],
+                                                 feed_dict={self.features: batch_features,
+                                                            self.fine_labels: batch_labels,
+                                                            self.bn_train: False,
+                                                            self.keep_prob: 1.0,})
+                    loss_valid_batch.append(loss)
+                    y_true = np.argmax(batch_labels, axis=1)
+                    y_pred = np.argmax(logits, axis=1)
+                    acc_valid_batch.append(accuracy_score(y_true, y_pred))
+                    best_n = np.argsort(logits, axis=1)[:,-n_top:]
+                    top_n_acc_valid_batch.append(np.mean([(y_true[batch_idx] in best_n[batch_idx]) for batch_idx in range(len(y_true))]))
+                ### record training loss for each epoch (instead of each iteration)
+                loss_train.append(np.mean(loss_train_batch))
+                loss_valid.append(np.mean(loss_valid_batch))
+                acc_train.append(np.mean(acc_train_batch))
+                acc_valid.append(np.mean(acc_valid_batch))
+                top_n_acc_train.append(np.mean(top_n_acc_train_batch))
+                top_n_acc_valid.append(np.mean(top_n_acc_valid_batch))
+                print('Epoch: %d, train loss: %f, valid loss: %f, train accuracy: %f, valid accuracy: %f' % \
+                      (epoch, np.mean(loss_train_batch), np.mean(loss_valid_batch), np.mean(acc_train_batch), np.mean(acc_valid_batch)))
+                print('           top-%d train accuracy: %f, top-%d valid accuracy: %f' % \
+                      (n_top, np.mean(top_n_acc_train_batch), n_top, np.mean(top_n_acc_valid_batch)))
+                
+                ### save model if improvement, stop if reach patience
+                current_loss = np.mean(loss_valid_batch)
+                current_acc = np.mean(acc_valid_batch)
+                if epoch == 1:
                     best_loss = current_loss
                     best_acc = current_acc
-                    self.saver.save(self.sess,
-                                    os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
-                                    global_step=epoch)
-                    stopping_step = 0
                 else:
-                    stopping_step += 1
-                print('stopping_step = %d' % stopping_step)
-                if stopping_step >= patience:
-                    print('stopping_step >= patience (%d), stop training' % patience)
-                    break
-        return [loss_train, loss_valid, acc_train, acc_valid]
+                    #if current_loss < best_loss or current_acc > best_acc:
+                    if current_loss < best_loss: ## only monitor loss
+                        best_loss = current_loss
+                        best_acc = current_acc
+                        self.saver.save(self.sess,
+                                        os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
+                                        global_step=epoch)
+                        stopping_step = 0
+                    else:
+                        stopping_step += 1
+                    print('stopping_step = %d' % stopping_step)
+                    if stopping_step >= patience:
+                        print('stopping_step >= patience (%d), stop training' % patience)
+                        break
+            return [loss_train, loss_valid, acc_train, acc_valid]
     
     def inference(self,
                   test_novel_path, ## test_novel_feat path (must be specified!)
@@ -680,7 +682,7 @@ class FSL(object):
             for idx in tqdm.tqdm(range(nBatches_test)):
                 batch_features = features_test[idx*bsize:(idx+1)*bsize]
                 batch_labels = fine_labels_test[idx*bsize:(idx+1)*bsize]
-                loss, logits = self.sess.run([self.loss, self.dense16],
+                loss, logits = self.sess.run([self.loss, self.logits],
                                              feed_dict={self.features: batch_features,
                                                         self.fine_labels: batch_labels,
                                                         self.bn_train: False,

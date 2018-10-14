@@ -293,14 +293,14 @@ class VGG(object):
                 batch_labels = fine_labels_train[arr[idx*bsize:(idx+1)*bsize]]
                 #print(batch_labels.shape)
                 if epoch <= num_epoch*ratio_for_dense:
-                    _, loss, logits = self.sess.run([self.opt_mlp, self.loss, self.dense16],
+                    _, loss, logits = self.sess.run([self.opt_mlp, self.loss, self.logits],
                                                     feed_dict={self.images: batch_data_aug,
                                                                self.fine_labels: batch_labels,
                                                                self.bn_train: True,
                                                                self.keep_prob: 0.5,
                                                                self.learning_rate: learning_rate})
                 else:
-                    _, loss, logits = self.sess.run([self.opt_all, self.loss, self.dense16],
+                    _, loss, logits = self.sess.run([self.opt_all, self.loss, self.logits],
                                                     feed_dict={self.images: batch_data_aug,
                                                                self.fine_labels: batch_labels,
                                                                self.bn_train: True,
@@ -318,7 +318,7 @@ class VGG(object):
                 batch_data = data_valid[idx*bsize:(idx+1)*bsize]
                 batch_labels = fine_labels_valid[idx*bsize:(idx+1)*bsize]
                 #print(batch_labels.shape)
-                loss, logits = self.sess.run([self.loss, self.dense16],
+                loss, logits = self.sess.run([self.loss, self.logits],
                                              feed_dict={self.images: batch_data,
                                                         self.fine_labels: batch_labels,
                                                         self.bn_train: False,
@@ -414,7 +414,7 @@ class VGG(object):
             for idx in tqdm.tqdm(range(nBatches_test)):
                 batch_data = data_test[idx*bsize:(idx+1)*bsize]
                 batch_labels = fine_labels_test[idx*bsize:(idx+1)*bsize]
-                loss, logits = self.sess.run([self.loss, self.dense16],
+                loss, logits = self.sess.run([self.loss, self.logits],
                                              feed_dict={self.images: batch_data,
                                                         self.fine_labels: batch_labels,
                                                         self.bn_train: False,
