@@ -31,7 +31,6 @@ def main():
     parser.add_argument('--debug', default=False, type=bool, help='Debug mode or not')
     args = parser.parse_args()
     train(args)
-    inference(args)
 
 # Use base classes to train the feature extractor
 def train(args):
@@ -88,24 +87,3 @@ def train(args):
     fig.savefig(os.path.join(args.result_path, args.model_name, 'learning_curve.jpg'),
                 bbox_inches='tight')
     plt.close(fig)
-
-# Inference
-def inference(args):
-    print('============================ inference ============================')
-    tf.reset_default_graph()
-    with tf.Session() as sess:
-        net = FSL(sess,
-                  model_name=args.model_name,
-                  result_path=args.result_path,
-                  fc_dim=args.fc_dim,
-                  n_fine_class=args.n_fine_classes)
-        net.build_model()
-        net.inference(test_novel_path=os.path.join(args.result_path, args.extractor_name, 'test_novel_feat'),
-                      test_base_path=os.path.join(args.result_path, args.extractor_name, 'test_base_feat'),
-                      gen_from=os.path.join(args.result_path, args.model_name, 'models'),
-                      out_path=os.path.join(args.result_path, args.model_name),
-                      n_top=args.n_top,
-                      bsize=args.bsize)
-
-if __name__ == '__main__':
-    main()
