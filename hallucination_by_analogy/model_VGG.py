@@ -506,7 +506,7 @@ class VGG(object):
             print(" [*] Failed to find a checkpoint")
             return False, 0
 
-# VGG without the first 4 stages
+# VGG with only the first 4 stages
 class VGG_SMALL(VGG):
     def __init__(self,
                  sess,

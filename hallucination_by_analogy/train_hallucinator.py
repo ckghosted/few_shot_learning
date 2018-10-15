@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 import tensorflow as tf
 import numpy as np
-from model_FSL_hal import HAL
+from model_HAL import HAL
 import os, re, glob
 
 import argparse
