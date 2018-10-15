@@ -70,7 +70,7 @@ def train(args):
                         learning_rate=args.learning_rate,
                         num_epoch=args.num_epoch,
                         patience=args.patience)
-    np.save(os.path.join(args.result_path, args.extractor_name, 'results.npy'), res)
+    np.save(os.path.join(args.result_path, args.hallucinator_name, 'results.npy'), res)
     
     # Debug: Check trainable variables and regularizers
     if args.debug:
@@ -85,16 +85,16 @@ def train(args):
             print(var.name)
     
     # Plot learning curve
-    results = np.load(os.path.join(args.result_path, args.extractor_name, 'results.npy'))
+    results = np.load(os.path.join(args.result_path, args.hallucinator_name, 'results.npy'))
     fig, ax = plt.subplots(1,1, figsize=(8,6))
-    ax[0].plot(range(1, len(results[0])+1), results[0], label='Training error')
-    ax[0].plot(range(1, len(results[1])+1), results[1], label='Validation error')
-    ax[0].set_xticks(np.arange(1, len(results[0])+1))
-    ax[0].set_xlabel('Training epochs', fontsize=16)
-    ax[0].set_ylabel('Cross entropy', fontsize=16)
-    ax[0].legend(fontsize=16)
+    ax.plot(range(1, len(results[0])+1), results[0], label='Training error')
+    ax.plot(range(1, len(results[1])+1), results[1], label='Validation error')
+    ax.set_xticks(np.arange(1, len(results[0])+1))
+    ax.set_xlabel('Training epochs', fontsize=16)
+    ax.set_ylabel('%4f * MSE + classification error' % args.loss_lambda, fontsize=16)
+    ax.legend(fontsize=16)
     plt.suptitle('Learning Curve', fontsize=20)
-    fig.savefig(os.path.join(args.result_path, args.extractor_name, 'learning_curve.jpg'),
+    fig.savefig(os.path.join(args.result_path, args.hallucinator_name, 'learning_curve.jpg'),
                 bbox_inches='tight')
     plt.close(fig)
 

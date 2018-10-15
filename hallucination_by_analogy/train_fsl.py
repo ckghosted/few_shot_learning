@@ -47,7 +47,7 @@ def train(args):
         res = net.train(train_novel_path=os.path.join(args.result_path, args.extractor_name, 'train_novel_feat'),
                         train_base_path=os.path.join(args.result_path, args.extractor_name, 'train_base_feat'),
                         hal_from=os.path.join(args.result_path, args.hallucinator_name, 'models_hal'),
-                        mlp_from=os.path.join(args.result_path, args.extractor_name, 'models'),
+                        #mlp_from=os.path.join(args.result_path, args.extractor_name, 'models'),
                         n_shot=args.n_shot,
                         n_min=args.n_min,
                         n_top=args.n_top,
@@ -55,7 +55,7 @@ def train(args):
                         learning_rate=args.learning_rate,
                         num_epoch=args.num_epoch,
                         patience=args.patience)
-    np.save(os.path.join(args.result_path, args.extractor_name, 'results.npy'), res)
+    np.save(os.path.join(args.result_path, args.model_name, 'results.npy'), res)
     
     # Debug: Check trainable variables and regularizers
     if args.debug:
@@ -70,7 +70,7 @@ def train(args):
             print(var.name)
     
     # Plot learning curve
-    results = np.load(os.path.join(args.result_path, args.extractor_name, 'results.npy'))
+    results = np.load(os.path.join(args.result_path, args.model_name, 'results.npy'))
     fig, ax = plt.subplots(1,2, figsize=(15,6))
     ax[0].plot(range(1, len(results[0])+1), results[0], label='Training error')
     ax[0].plot(range(1, len(results[1])+1), results[1], label='Validation error')
@@ -85,7 +85,7 @@ def train(args):
     ax[1].set_ylabel('Accuracy', fontsize=16)
     ax[1].legend(fontsize=16)
     plt.suptitle('Learning Curve', fontsize=20)
-    fig.savefig(os.path.join(args.result_path, args.extractor_name, 'learning_curve.jpg'),
+    fig.savefig(os.path.join(args.result_path, args.model_name, 'learning_curve.jpg'),
                 bbox_inches='tight')
     plt.close(fig)
 
