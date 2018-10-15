@@ -12,7 +12,7 @@ python3 preprocessing.py \
 ### (2) Train the CNN-based feature extractor and extract features
 ```
 python3 train_extractor.py \
-  --data_path [Path of the split train and test data (e.g., the path to save train_novel, train_base, test_novel, and test_base)] \
+  --data_path [Path of the split train and test data (train_novel, train_base, test_novel, and test_base)] \
   --result_path [Path to save all the results] \
   --extractor_name [Folder name (under result_path) to save the checkpoints of the extractor] \
   --vgg16_npy_path [Path of the imagenet pre-trained weights of VGG16 (e.g., the path to vgg16.npy)]
