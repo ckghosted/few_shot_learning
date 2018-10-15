@@ -280,9 +280,14 @@ class FSL(object):
                     np.concatenate((selected_features_per_lb, feature_hallucinated), axis=0)
                 labels_novel_final[lb_counter*n_min:(lb_counter+1)*n_min,:] = np.eye(self.n_fine_class)[np.repeat(lb, n_min)]
                 lb_counter += 1
-        features_train = np.concatenate((features_novel_final, features_base_train), axis=0)
+        ### Before concatenating the (repeated or hallucinated) novel dataset and the base dataset,
+        ### repeat the novel dataset (400/n_min since each base class only has 80% original samples) to balance novel/base
+        features_novel_balanced = np.repeat(features_novel_final, int(400/n_min), axis=0)
+        labels_novel_balanced = np.repeat(labels_novel_final, int(400/n_min), axis=0)
+        ### Concatenate the novel dataset and the base dataset
+        features_train = np.concatenate((features_novel_balanced, features_base_train), axis=0)
         print('features_train.shape: %s' % (features_train.shape,))
-        fine_labels_train = np.concatenate((labels_novel_final, labels_base_train), axis=0)
+        fine_labels_train = np.concatenate((labels_novel_balanced, labels_base_train), axis=0)
         nBatches = int(np.ceil(features_train.shape[0] / bsize))
         
         ### For the validation split, just combine all base samples and all novel samples
