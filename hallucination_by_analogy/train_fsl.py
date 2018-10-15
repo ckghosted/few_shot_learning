@@ -41,7 +41,8 @@ def train(args):
                   model_name=args.model_name,
                   result_path=args.result_path,
                   fc_dim=args.fc_dim,
-                  n_fine_class=args.n_fine_classes)
+                  n_fine_class=args.n_fine_classes,
+                  l2scale=args.l2scale)
         all_vars, trainable_vars, all_regs = net.build_model()
         res = net.train(train_novel_path=os.path.join(args.result_path, args.extractor_name, 'train_novel_feat'),
                         train_base_path=os.path.join(args.result_path, args.extractor_name, 'train_base_feat'),
