@@ -72,6 +72,7 @@ def split_base_novel(args):
     test_base_dict[b'data'] = test_dict[b'data'][base_indexes]
 
     ## Save
+    dopickle(class_mapping, os.path.join(args.data_path, 'class_mapping'))
     dopickle(train_novel_dict, os.path.join(args.data_path, 'train_novel'))
     dopickle(train_base_dict, os.path.join(args.data_path, 'train_base'))
     dopickle(test_novel_dict, os.path.join(args.data_path, 'test_novel'))
