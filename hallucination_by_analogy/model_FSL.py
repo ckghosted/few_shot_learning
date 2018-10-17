@@ -158,6 +158,7 @@ class FSL(object):
     
     def hallucinate(self,
                     seed_feature,
+                    seed_coarse_lb,
                     n_samples_needed,
                     train_base_path):
         #print(" [***] Hallucinator Load SUCCESS")
@@ -168,6 +169,14 @@ class FSL(object):
         features_base_train = train_base_dict[b'features'][0:int(features_len*0.8)]
         fine_labels = [int(s) for s in train_base_dict[b'fine_labels'][0:int(features_len*0.8)]]
         labels_base_train = np.eye(self.n_fine_class)[fine_labels]
+
+        ### Use base classes belonging to the same coarse class (specified by 'seed_coarse_lb') only
+        if seed_coarse_lb:
+            coarse_base_train = [int(s) for s in train_base_dict[b'coarse_labels'][0:int(features_len*0.8)]]
+            same_coarse_indexes = [idx for idx in range(len(coarse_base_train)) \
+                                   if coarse_base_train[idx] == seed_coarse_lb]
+            features_base_train = features_base_train[same_coarse_indexes]
+            labels_base_train = labels_base_train[same_coarse_indexes]
         
         ### Create a batch of size "n_samples_needed", with each row being consisted of
         ### (base_feature1, base_feature2, seed_feature), where base_feature1 and base_feature2
@@ -203,6 +212,7 @@ class FSL(object):
               #mlp_from, ## e.g., mlp_name (must given)
               hal_from_ckpt=None, ## e.g., hal_name+'.model-1680' (can be None)
               #mlp_from_ckpt=None, ## e.g., mlp_name+'.model-1680' (can be None)
+              data_path=None, ## class_mapping path (if None, don't consider coarse labels for hallucination)
               n_shot=1,
               n_min=20, ## minimum number of samples per training class ==> (n_min - n_shot) more samples need to be hallucinated
               n_top=5, ## top-n accuracy
@@ -236,6 +246,21 @@ class FSL(object):
         fine_labels = [int(s) for s in train_base_dict[b'fine_labels'][int(features_len*0.8):int(features_len)]]
         labels_base_valid = np.eye(self.n_fine_class)[fine_labels]
         
+        ### Load the {Superclass: {Classes}} dictionary
+        if not os.path.exists(os.path.join(data_path, 'class_mapping')):
+            class_mapping_inv = None
+        else:
+            class_mapping = unpickle(os.path.join(data_path, 'class_mapping'))
+            ### Make an inverse mapping from (novel) fine labels to the corresponding coarse labels
+            class_mapping_inv = {}
+            for fine_lb in set(train_novel_dict[b'fine_labels']):
+                for coarse_lb in class_mapping.keys():
+                    if fine_lb in class_mapping[coarse_lb]:
+                        class_mapping_inv[fine_lb] = coarse_lb
+                        break
+            print('class_mapping_inv:')
+            print(class_mapping_inv)
+
         ## load previous trained hallucinator and mlp linear classifier
         could_load_hal, checkpoint_counter_hal = self.load_hal(hal_from, hal_from_ckpt)
         #could_load_mlp, checkpoint_counter_mlp = self.load_mlp(mlp_from, mlp_from_ckpt)
@@ -267,12 +292,14 @@ class FSL(object):
                 ##### (2) Randomly select a seed feature (from the above n-shot samples) for hallucination
                 seed_index = np.random.choice(selected_indexes_per_lb, 1)
                 seed_feature = features_novel_train[seed_index]
+                seed_coarse_lb = class_mapping_inv[lb] if class_mapping_inv else None
                 ##### (3) Collect (n_shot) selected features and (n_min - n_shot) hallucinated features
                 if not could_load_hal:
                     print('Load hallucinator or mlp linear classifier fail!!!!!!')
                     feature_hallucinated = np.repeat(seed_feature, n_min-n_shot, axis=0)
                 else:
                     feature_hallucinated = self.hallucinate(seed_feature=seed_feature,
+                                                            seed_coarse_lb=seed_coarse_lb,
                                                             n_samples_needed=n_min-n_shot,
                                                             train_base_path=train_base_path)
                     print('feature_hallucinated.shape: %s' % (feature_hallucinated.shape,))
