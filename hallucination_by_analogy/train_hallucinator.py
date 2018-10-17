@@ -29,6 +29,7 @@ def main():
     parser.add_argument('--extractor_name', type=str, help='Folder name of the saved extractor model')
     parser.add_argument('--quadruplet_name', type=str, help='File name of the saved quadruplet data (under the extractor folder)')
     parser.add_argument('--hallucinator_name', type=str, help='Folder name to save hallucinator models and learning curves')
+    parser.add_argument('--cos_sim_threshold', default=0.0, type=float, help='Threshold of the cosine similarity')
     parser.add_argument('--loss_lambda', default=10.0, type=float, help='Scale to control the weighting of the MSE loss and the classification loss')
     parser.add_argument('--n_base_classes', default=80, type=int, help='Number of the base classes')
     parser.add_argument('--bsize', default=32, type=int, help='Batch size')
@@ -44,10 +45,11 @@ def main():
 # Train the hallucinator
 def train(args):
     train_for_hal_path = os.path.join(args.result_path, args.extractor_name, args.quadruplet_name)
-    train_dict_for_hal = unpickle(train_for_hal_path)
     train_base_path = os.path.join(args.result_path, args.extractor_name, 'train_base_feat')
-    train_base_dict = unpickle(train_base_path)
+    
     if args.debug:
+        train_dict_for_hal = unpickle(train_for_hal_path)
+        train_base_dict = unpickle(train_base_path)
         print('Number of classes for training hallucinator: %d' % len(set(train_dict_for_hal[b'fine_labels'])))
         print('Number of base classes: %d' % len(set(train_base_dict[b'fine_labels'])))
         labels_in_train_for_hal = set(train_dict_for_hal[b'fine_labels'])
@@ -66,6 +68,7 @@ def train(args):
         res = net.train(train_path=train_for_hal_path,
                         train_base_path=train_base_path,
                         init_from=os.path.join(args.result_path, args.extractor_name, 'models'),
+                        cos_sim_threshold=args.cos_sim_threshold,
                         bsize=args.bsize,
                         learning_rate=args.learning_rate,
                         num_epoch=args.num_epoch,

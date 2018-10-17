@@ -59,7 +59,7 @@ class HAL(object):
         self.logits = self.build_mlp(self.hallucinated_features)
         print("build model finished, define loss and optimizer")
         
-        self.loss_mse = tf.reduce_mean((self.target_features - self.hallucinated_features)**2, axis=1)
+        self.loss_mse = tf.reduce_mean((self.target_features - self.hallucinated_features)**2)
         self.loss_cls = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.fine_labels,
                                                                                logits=self.logits))
         self.loss = self.loss_lambda * self.loss_mse + self.loss_cls
@@ -127,6 +127,7 @@ class HAL(object):
               train_path,
               train_base_path,
               init_from=None, ## e.g., model_name (if None ==> train from scratch)
+              cos_sim_threshold=0.0,
               bsize=32,
               learning_rate=5e-5,
               num_epoch=50,
@@ -144,10 +145,19 @@ class HAL(object):
         ### and split each of them into training/validation by 80/20
         train_dict = unpickle(train_path)
         data_len = len(train_dict[b'fine_labels'])
-        triplet_feature_train = train_dict[b'triplet_features'][0:int(data_len*0.8)]
-        triplet_feature_valid = train_dict[b'triplet_features'][int(data_len*0.8):int(data_len)]
-        target_feature_train = train_dict[b'target_features'][0:int(data_len*0.8)]
-        target_feature_valid = train_dict[b'target_features'][int(data_len*0.8):int(data_len)]
+        
+        ### Use quadruplets with high cosine similarities (specified by 'cos_sim_threshold')
+        qualified_indexes = [idx for idx in range(data_len) if train_dict[b'cos_sim'][idx] > cos_sim_threshold]
+        triplet_feature = train_dict[b'triplet_features'][qualified_indexes]
+        target_feature = train_dict[b'target_features'][qualified_indexes]
+        fine_labels = [train_dict[b'fine_labels'][idx] for idx in qualified_indexes]
+        data_len = len(fine_labels)
+        print('After thresholdng, we have %d quadruplets' % data_len)
+
+        triplet_feature_train = triplet_feature[0:int(data_len*0.8)]
+        triplet_feature_valid = triplet_feature[int(data_len*0.8):int(data_len)]
+        target_feature_train = target_feature[0:int(data_len*0.8)]
+        target_feature_valid = target_feature[int(data_len*0.8):int(data_len)]
         nBatches = int(np.ceil(triplet_feature_train.shape[0] / bsize))
         nBatches_valid = int(np.ceil(triplet_feature_valid.shape[0] / bsize))
         ### one-hot, but need to consider the following error first:
@@ -160,16 +170,16 @@ class HAL(object):
         train_base_dict = unpickle(train_base_path)
         for new_lb in range(self.n_fine_class):
             label_mapping[np.sort(list(set(train_base_dict[b'fine_labels'])))[new_lb]] = new_lb
-        fine_labels = [int(s) for s in train_dict[b'fine_labels'][0:int(data_len*0.8)]]
-        fine_labels_new = [label_mapping[old_lb] for old_lb in fine_labels]
+        fine_labels_old = [int(s) for s in fine_labels[0:int(data_len*0.8)]]
+        fine_labels_new = [label_mapping[old_lb] for old_lb in fine_labels_old]
         fine_labels_train = np.eye(self.n_fine_class)[fine_labels_new]
-        fine_labels = [int(s) for s in train_dict[b'fine_labels'][int(data_len*0.8):int(data_len)]]
-        fine_labels_new = [label_mapping[old_lb] for old_lb in fine_labels]
+        fine_labels_old = [int(s) for s in fine_labels[int(data_len*0.8):int(data_len)]]
+        fine_labels_new = [label_mapping[old_lb] for old_lb in fine_labels_old]
         fine_labels_valid = np.eye(self.n_fine_class)[fine_labels_new]
         
         ### Data indexes used to shuffle training order
         arr = np.arange(triplet_feature_train.shape[0])
-    
+        
         ### initialization
         initOp = tf.global_variables_initializer()
         self.sess.run(initOp)
@@ -184,6 +194,17 @@ class HAL(object):
         else:
             print(" [@] train from scratch")
         
+        ### Debug
+        # print(label_mapping)
+        # print('triplet_feature_train.shape = %s' % (triplet_feature_train.shape,))
+        # print('triplet_feature_valid.shape = %s' % (triplet_feature_valid.shape,))
+        # print('target_feature_train.shape = %s' % (target_feature_train.shape,))
+        # print('target_feature_valid.shape = %s' % (target_feature_valid.shape,))
+        # print('len(fine_labels_train) = %d' % len(fine_labels_train))
+        # print('len(fine_labels_valid) = %d' % len(fine_labels_valid))
+        # print('nBatches = %d' % nBatches)
+        # print('nBatches_valid = %d' % nBatches_valid)
+
         ### main training loop
         loss_train = []
         loss_valid = []
