@@ -15,7 +15,7 @@ def unpickle(file):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--raw_path', type=str, help='Path of cifar-100 raw data (train and test)')
-    parser.add_argument('--data_path', type=str, help='Path to save the produced train_novel, train_base, and test_novel, and test_base')
+    parser.add_argument('--data_path', type=str, help='Path to save the produced train_novel, train_base, test_novel, and test_base')
     args = parser.parse_args()
     if not os.path.exists(args.data_path):
         os.makedirs(args.data_path)
