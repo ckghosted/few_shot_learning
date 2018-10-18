@@ -160,7 +160,9 @@ class FSL(object):
                     seed_feature,
                     seed_coarse_lb,
                     n_samples_needed,
-                    train_base_path):
+                    train_base_path,
+                    coarse_specific,
+                    hal_from):
         #print(" [***] Hallucinator Load SUCCESS")
         ### Load training features and labels of the base classes
         ### (Take the first 80% since the rest are used for validation in the train() function)
@@ -177,6 +179,12 @@ class FSL(object):
                                    if coarse_base_train[idx] == seed_coarse_lb]
             features_base_train = features_base_train[same_coarse_indexes]
             labels_base_train = labels_base_train[same_coarse_indexes]
+            if coarse_specific:
+                print('Load hallucinator for coarse label %02d...' % seed_coarse_lb)
+                hal_from_basename = os.path.basename(hal_from)
+                hal_from_folder = os.path.abspath(os.path.join(hal_from, '..'))
+                hal_from_new = os.path.join(hal_from_folder + '_coarse%02d' % seed_coarse_lb, hal_from_basename)
+                could_load_hal, checkpoint_counter_hal = self.load_hal(hal_from_new, None)
         
         ### Create a batch of size "n_samples_needed", with each row being consisted of
         ### (base_feature1, base_feature2, seed_feature), where base_feature1 and base_feature2
@@ -213,6 +221,7 @@ class FSL(object):
               hal_from_ckpt=None, ## e.g., hal_name+'.model-1680' (can be None)
               #mlp_from_ckpt=None, ## e.g., mlp_name+'.model-1680' (can be None)
               data_path=None, ## class_mapping path (if None, don't consider coarse labels for hallucination)
+              coarse_specific=False, ## if True, use coarse-label-specific hallucinators
               n_shot=1,
               n_min=20, ## minimum number of samples per training class ==> (n_min - n_shot) more samples need to be hallucinated
               n_top=5, ## top-n accuracy
@@ -262,7 +271,8 @@ class FSL(object):
             print(class_mapping_inv)
 
         ## load previous trained hallucinator and mlp linear classifier
-        could_load_hal, checkpoint_counter_hal = self.load_hal(hal_from, hal_from_ckpt)
+        if not coarse_specific:
+            could_load_hal, checkpoint_counter_hal = self.load_hal(hal_from, hal_from_ckpt)
         #could_load_mlp, checkpoint_counter_mlp = self.load_mlp(mlp_from, mlp_from_ckpt)
 
         ### For the training split, use all base samples and randomly selected novel samples.
@@ -294,14 +304,16 @@ class FSL(object):
                 seed_feature = features_novel_train[seed_index]
                 seed_coarse_lb = class_mapping_inv[lb] if class_mapping_inv else None
                 ##### (3) Collect (n_shot) selected features and (n_min - n_shot) hallucinated features
-                if not could_load_hal:
+                if (not coarse_specific) and (not could_load_hal):
                     print('Load hallucinator or mlp linear classifier fail!!!!!!')
                     feature_hallucinated = np.repeat(seed_feature, n_min-n_shot, axis=0)
                 else:
                     feature_hallucinated = self.hallucinate(seed_feature=seed_feature,
                                                             seed_coarse_lb=seed_coarse_lb,
                                                             n_samples_needed=n_min-n_shot,
-                                                            train_base_path=train_base_path)
+                                                            train_base_path=train_base_path,
+                                                            coarse_specific=coarse_specific,
+                                                            hal_from=hal_from)
                     print('feature_hallucinated.shape: %s' % (feature_hallucinated.shape,))
                 features_novel_final[lb_counter*n_min:(lb_counter+1)*n_min,:] = \
                     np.concatenate((selected_features_per_lb, feature_hallucinated), axis=0)

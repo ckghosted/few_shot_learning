@@ -126,6 +126,8 @@ class HAL(object):
     def train(self,
               train_path,
               train_base_path,
+              data_path=None, ## class_mapping path (if None, don't consider coarse labels for hallucination)
+              coarse_lb_spec=-1, ## Coarse label for the coarse-label-specific hallucinator (if -1, coarse-label-agnostic)
               init_from=None, ## e.g., model_name (if None ==> train from scratch)
               cos_sim_threshold=0.0,
               bsize=32,
@@ -153,6 +155,26 @@ class HAL(object):
         fine_labels = [train_dict[b'fine_labels'][idx] for idx in qualified_indexes]
         data_len = len(fine_labels)
         print('After thresholdng, we have %d quadruplets' % data_len)
+
+        ### Use quadruplets with target_features belonging to the specified coarse label
+        ### (specified by 'coarse_lb') to train the coarse-label-specific hallucinator
+        if coarse_lb_spec in range(20):
+            class_mapping = unpickle(os.path.join(data_path, 'class_mapping'))
+            train_base_dict = unpickle(train_base_path)
+            #### Make an inverse mapping from (base) fine labels to the corresponding coarse labels
+            class_mapping_inv = {}
+            for fine_lb in set(train_base_dict[b'fine_labels']):
+                for coarse_lb in class_mapping.keys():
+                    if fine_lb in class_mapping[coarse_lb]:
+                        class_mapping_inv[fine_lb] = coarse_lb
+                        break
+            qualified_indexes = [idx for idx in range(data_len) if class_mapping_inv[train_dict[b'fine_labels'][idx]] == coarse_lb_spec]
+            triplet_feature = train_dict[b'triplet_features'][qualified_indexes]
+            target_feature = train_dict[b'target_features'][qualified_indexes]
+            fine_labels = [train_dict[b'fine_labels'][idx] for idx in qualified_indexes]
+            data_len = len(fine_labels)
+            print('For coarse label %d, we got %d quadruplets for training the coarse-label-specific hallucinator' \
+                  % (coarse_lb_spec, data_len))
 
         triplet_feature_train = triplet_feature[0:int(data_len*0.8)]
         triplet_feature_valid = triplet_feature[int(data_len*0.8):int(data_len)]
