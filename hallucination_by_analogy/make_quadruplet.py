@@ -62,6 +62,7 @@ def make_quadruplet(args):
     ## (2) For each pair of class, collect "similar" pairs of centers
     quadruplet_collection = None
     fine_label_collection = []
+    cos_sim_collection = []
     for lb1 in set(train_base_dict[b'fine_labels']):
         if args.debug:
             print('class %d' % lb1)
@@ -91,6 +92,7 @@ def make_quadruplet(args):
                 else:
                     quadruplet_collection = np.concatenate((quadruplet_collection, np.expand_dims(quadruplet, 0)), axis=0)
                 fine_label_collection.append(best_lb2)
+                cos_sim_collection.append(max_cos_sim)
         if args.debug and quadruplet_collection is not None:
             print('    quadruplet_collection.shape: %s, len(fine_label_collection) = %d' % \
                   (quadruplet_collection.shape, len(fine_label_collection)))
@@ -98,6 +100,7 @@ def make_quadruplet(args):
     ## (3) Re-arrange and save
     train_dict_for_hal = {}
     train_dict_for_hal[b'fine_labels'] = fine_label_collection
+    train_dict_for_hal[b'cos_sim'] = cos_sim_collection
     if args.debug:
         print(len(train_dict_for_hal[b'fine_labels']))
     fc_dim = quadruplet_collection.shape[-1]
