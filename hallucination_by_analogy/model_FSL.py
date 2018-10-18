@@ -236,24 +236,17 @@ class FSL(object):
             os.makedirs(os.path.join(self.result_path, self.model_name))
             os.makedirs(os.path.join(self.result_path, self.model_name, 'models'))
         
-        ### Load training features (as two dictionaries) from both base and novel classes,
-        ### and split each of them into training/validation by 80/20
+        ### Load training features (as two dictionaries) from both base and novel classes
         train_novel_dict = unpickle(train_novel_path)
         features_len = len(train_novel_dict[b'fine_labels'])
-        features_novel_train = train_novel_dict[b'features'][0:int(features_len*0.8)]
-        features_novel_valid = train_novel_dict[b'features'][int(features_len*0.8):int(features_len)]
-        fine_labels = [int(s) for s in train_novel_dict[b'fine_labels'][0:int(features_len*0.8)]]
+        features_novel_train = train_novel_dict[b'features']
+        fine_labels = [int(s) for s in train_novel_dict[b'fine_labels']]
         labels_novel_train = np.eye(self.n_fine_class)[fine_labels]
-        fine_labels = [int(s) for s in train_novel_dict[b'fine_labels'][int(features_len*0.8):int(features_len)]]
-        labels_novel_valid = np.eye(self.n_fine_class)[fine_labels]
         train_base_dict = unpickle(train_base_path)
         features_len = len(train_base_dict[b'fine_labels'])
-        features_base_train = train_base_dict[b'features'][0:int(features_len*0.8)]
-        features_base_valid = train_base_dict[b'features'][int(features_len*0.8):int(features_len)]
-        fine_labels = [int(s) for s in train_base_dict[b'fine_labels'][0:int(features_len*0.8)]]
+        features_base_train = train_base_dict[b'features']
+        fine_labels = [int(s) for s in train_base_dict[b'fine_labels']]
         labels_base_train = np.eye(self.n_fine_class)[fine_labels]
-        fine_labels = [int(s) for s in train_base_dict[b'fine_labels'][int(features_len*0.8):int(features_len)]]
-        labels_base_valid = np.eye(self.n_fine_class)[fine_labels]
         
         ### Load the {Superclass: {Classes}} dictionary
         if not os.path.exists(os.path.join(data_path, 'class_mapping')):
@@ -320,19 +313,23 @@ class FSL(object):
                 labels_novel_final[lb_counter*n_min:(lb_counter+1)*n_min,:] = np.eye(self.n_fine_class)[np.repeat(lb, n_min)]
                 lb_counter += 1
         ### Before concatenating the (repeated or hallucinated) novel dataset and the base dataset,
-        ### repeat the novel dataset (400/n_min since each base class only has 80% original samples) to balance novel/base
-        features_novel_balanced = np.repeat(features_novel_final, int(400/n_min), axis=0)
-        labels_novel_balanced = np.repeat(labels_novel_final, int(400/n_min), axis=0)
+        ### repeat the novel dataset (500/n_min since each base class only has 80% original samples) to balance novel/base
+        features_novel_balanced = np.repeat(features_novel_final, int(500/n_min), axis=0)
+        labels_novel_balanced = np.repeat(labels_novel_final, int(500/n_min), axis=0)
         ### Concatenate the novel dataset and the base dataset
-        features_train = np.concatenate((features_novel_balanced, features_base_train), axis=0)
-        print('features_train.shape: %s' % (features_train.shape,))
-        fine_labels_train = np.concatenate((labels_novel_balanced, labels_base_train), axis=0)
-        nBatches = int(np.ceil(features_train.shape[0] / bsize))
+        features_train_ = np.concatenate((features_novel_balanced, features_base_train), axis=0)
+        fine_labels_train_ = np.concatenate((labels_novel_balanced, labels_base_train), axis=0)
         
-        ### For the validation split, just combine all base samples and all novel samples
-        features_valid = np.concatenate((features_novel_valid, features_base_valid), axis=0)
-        fine_labels_valid = np.concatenate((labels_novel_valid, labels_base_valid), axis=0)
+        ### After hallucination and balancing, split final training data into training/validation by 80/20
+        features_len = features_train_.shape[0]
+        features_train = features_train_[0:int(features_len*0.8)]
+        features_valid = features_train_[int(features_len*0.8):int(features_len)]
+        fine_labels_train = fine_labels_train_[0:int(features_len*0.8)]
+        fine_labels_valid = fine_labels_train_[int(features_len*0.8):int(features_len)]
+        nBatches = int(np.ceil(features_train.shape[0] / bsize))
         nBatches_valid = int(np.ceil(features_valid.shape[0] / bsize))
+        print('features_train.shape: %s' % (features_train.shape,))
+        print('features_valid.shape: %s' % (features_valid.shape,))
         
         ### Features indexes used to shuffle training order
         arr = np.arange(features_train.shape[0])
