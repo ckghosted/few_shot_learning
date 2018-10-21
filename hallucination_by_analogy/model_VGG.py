@@ -132,9 +132,9 @@ class VGG(object):
                                                                   var_list=self.trainable_vars)
         
         ### Create model saver (keep the best 3 checkpoint)
-        self.saver = tf.train.Saver(max_to_keep = 3)
+        self.saver = tf.train.Saver(max_to_keep = 1)
         self.saver_cnn = tf.train.Saver(var_list = self.all_vars_cnn,
-                                        max_to_keep = 3)
+                                        max_to_keep = 1)
         return [self.all_vars, self.trainable_vars, self.all_regs]
         
     def build_cnn(self, input_):

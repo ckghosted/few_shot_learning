@@ -94,6 +94,7 @@ def inference(args):
                   model_name=args.extractor_name,
                   result_path=args.result_path,
                   fc_dim=args.fc_dim,
+                  n_fine_class=args.n_base_classes,
                   vgg16_npy_path=args.vgg16_npy_path)
         net.build_model()
         net.inference(test_path=os.path.join(args.data_path, 'test_base'),

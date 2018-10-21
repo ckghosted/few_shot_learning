@@ -88,11 +88,11 @@ class HAL(object):
         #                                                          var_list=self.trainable_vars)
         
         ### Create model saver (keep the best 3 checkpoint)
-        self.saver = tf.train.Saver(max_to_keep = 3)
+        self.saver = tf.train.Saver(max_to_keep = 1)
         self.saver_hal = tf.train.Saver(var_list = self.all_vars_hal,
-                                        max_to_keep = 3)
+                                        max_to_keep = 1)
         self.saver_mlp = tf.train.Saver(var_list = self.all_vars_mlp,
-                                        max_to_keep = 3)
+                                        max_to_keep = 1)
         return [self.all_vars, self.trainable_vars, self.all_regs]
     
     ## Used the classifier on the base classes learnt during representation learning

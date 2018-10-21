@@ -107,11 +107,11 @@ class FSL(object):
         #                                                          var_list=self.trainable_vars)
         
         ### Create model saver (keep the best 3 checkpoint)
-        self.saver = tf.train.Saver(max_to_keep = 3)
+        self.saver = tf.train.Saver(max_to_keep = 1)
         self.saver_hal = tf.train.Saver(var_list = self.all_vars_hal,
-                                        max_to_keep = 3)
+                                        max_to_keep = 1)
         #self.saver_mlp = tf.train.Saver(var_list = self.all_vars_mlp,
-        #                                max_to_keep = 3)
+        #                                max_to_keep = 1)
         return [self.all_vars, self.trainable_vars, self.all_regs]
     
     ## Used the classifier on the base classes learnt during representation learning
@@ -320,6 +320,14 @@ class FSL(object):
         features_train_ = np.concatenate((features_novel_balanced, features_base_train), axis=0)
         fine_labels_train_ = np.concatenate((labels_novel_balanced, labels_base_train), axis=0)
         
+        ### Before spliting training/validation, shuffle the whole dataset
+        arr = np.arange(features_train_.shape[0])
+        np.random.shuffle(arr)
+        features_train_ = features_train_[arr]
+        fine_labels_train_ = fine_labels_train_[arr]
+        print('features_train_.shape: %s' % (features_train_.shape,))
+        print('fine_labels_train_.shape: %s' % (fine_labels_train_.shape,))
+
         ### After hallucination and balancing, split final training data into training/validation by 80/20
         features_len = features_train_.shape[0]
         features_train = features_train_[0:int(features_len*0.8)]

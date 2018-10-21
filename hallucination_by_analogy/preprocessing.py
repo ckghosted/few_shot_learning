@@ -16,6 +16,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--raw_path', type=str, help='Path of cifar-100 raw data (train and test)')
     parser.add_argument('--data_path', type=str, help='Path to save the produced train_novel, train_base, test_novel, and test_base')
+    parser.add_argument('--n_novel_per_coarse', default=1, type=int, help='Number of novel classes per superclass')
     args = parser.parse_args()
     if not os.path.exists(args.data_path):
         os.makedirs(args.data_path)
@@ -41,11 +42,17 @@ def split_base_novel(args):
             class_mapping[test_dict[b'coarse_labels'][idx]] = set([test_dict[b'fine_labels'][idx]])
     #print(class_mapping)
 
-    ## Randomly sample one class for each superclass to form the set of novel classes
+    ## Randomly sample args.n_novel_per_coarse class for each superclass to form the set of novel classes
     novel_classes = []
     for coarse_labels_idx in range(len(set(train_dict[b'coarse_labels']))):
-        novel_classes.append(np.random.choice(list(class_mapping.get(coarse_labels_idx)), 1)[0])
-    #print(novel_classes)
+        novel_classes.extend(np.random.choice(list(class_mapping.get(coarse_labels_idx)),
+                                              args.n_novel_per_coarse,
+                                              replace=False)[:])
+    ## Inspect the selected novel classes
+    meta_dict = unpickle(os.path.join(args.raw_path, 'meta'))
+    for lb in novel_classes:
+        print(lb, end=': ')
+        print(meta_dict[b'fine_label_names'][lb])
 
     ## Make train_novel_dict and train_base_dict
     novel_indexes = [idx for idx in range(len(train_dict[b'fine_labels'])) if train_dict[b'fine_labels'][idx] in novel_classes]
@@ -70,9 +77,12 @@ def split_base_novel(args):
     test_base_dict[b'coarse_labels'] = [test_dict[b'coarse_labels'][idx] for idx in base_indexes]
     test_base_dict[b'fine_labels'] = [test_dict[b'fine_labels'][idx] for idx in base_indexes]
     test_base_dict[b'data'] = test_dict[b'data'][base_indexes]
-
+    
+    all_base_labels = list(set(train_base_dict[b'fine_labels']))
+    
     ## Save
     dopickle(class_mapping, os.path.join(args.data_path, 'class_mapping'))
+    dopickle(all_base_labels, os.path.join(args.data_path, 'all_base_labels'))
     dopickle(train_novel_dict, os.path.join(args.data_path, 'train_novel'))
     dopickle(train_base_dict, os.path.join(args.data_path, 'train_base'))
     dopickle(test_novel_dict, os.path.join(args.data_path, 'test_novel'))
