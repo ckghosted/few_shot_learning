@@ -44,7 +44,7 @@ def split_base_novel(args):
 
     ## Randomly sample args.n_novel_per_coarse class for each superclass to form the set of novel classes
     novel_classes = []
-    for coarse_labels_idx in range(len(set(train_dict[b'coarse_labels']))):
+    for coarse_labels_idx in set(train_dict[b'coarse_labels']):
         novel_classes.extend(np.random.choice(list(class_mapping.get(coarse_labels_idx)),
                                               args.n_novel_per_coarse,
                                               replace=False)[:])
