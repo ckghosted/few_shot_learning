@@ -29,7 +29,7 @@ import multiprocessing as mp
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_path', type=str, help='Path of the saved class_mapping dictionary')
+    parser.add_argument('--data_path', type=str, help='Path of the saved all_base_labels list and class_mapping dictionary')
     parser.add_argument('--result_path', type=str, help='Path to save all results')
     parser.add_argument('--extractor_name', type=str, help='Folder name of the saved extractor model')
     parser.add_argument('--quadruplet_name', type=str, help='File name to save the quadruplet data (under the extractor folder)')
@@ -134,6 +134,24 @@ def make_quadruplet(args, feature_pair_collection, subset_idx, output):
     ## of lb2 have the maximum cosine similarity.
     considered_idx1 = [idx for idx in range(all_possible_combination.shape[0]) \
                        if all_possible_combination[idx][0] < all_possible_combination[idx][1]]
+    
+    ## Make an inverse mapping from (base) fine labels to the corresponding coarse labels
+    class_mapping = unpickle(os.path.join(args.data_path, 'class_mapping'))
+    for coarse_lb in class_mapping:
+        temp_set = set()
+        for fine_lb in class_mapping[coarse_lb]:
+            if fine_lb in all_base_labels:
+                temp_set.add(fine_lb)
+        class_mapping[coarse_lb] = temp_set
+    class_mapping_inv = {}
+    for fine_lb in all_base_labels:
+        for coarse_lb in class_mapping.keys():
+            if fine_lb in class_mapping[coarse_lb]:
+                class_mapping_inv[fine_lb] = coarse_lb
+                break
+    if args.debug:
+        print(class_mapping_inv)
+    
     quadruplet_collection = None
     fine_label_collection1 = []
     fine_label_collection2 = []
@@ -146,7 +164,8 @@ def make_quadruplet(args, feature_pair_collection, subset_idx, output):
             max_cos_sim = 0
             best_lb2 = 0
             best_idx2 = 0
-            for lb2 in all_base_labels:
+            ### Consider only those fine labels belonging to the same coarse labels
+            for lb2 in class_mapping[class_mapping_inv[lb1]]:
                 if lb1 != lb2:
                     for idx2 in range(feature_pair_collection[lb2].shape[0]):
                         center_diff_1 = feature_pair_collection[lb1][idx1][0] - feature_pair_collection[lb1][idx1][1]

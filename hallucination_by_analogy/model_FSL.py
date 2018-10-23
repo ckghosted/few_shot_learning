@@ -157,7 +157,7 @@ class FSL(object):
         return self.relu3
     
     def hallucinate(self,
-                    seed_feature,
+                    seed_features,
                     seed_coarse_lb,
                     n_samples_needed,
                     train_base_path,
@@ -196,12 +196,12 @@ class FSL(object):
             lb = np.random.choice(all_possible_base_lbs, 1)
             #### (2) Randomly select two samples from the above base class
             candidate_indexes = [idx for idx in range(labels_base_train.shape[0]) if np.argmax(labels_base_train[idx]) == lb]
-            selected_indexes = np.random.choice(candidate_indexes, 2)
+            selected_indexes = np.random.choice(candidate_indexes, 2, replace=False)
             #### (3) Concatenate (base_feature1, base_feature2, seed_feature) to form a row of the model input
             ####     Note that seed_feature has shape (1, fc_dim) already ==> no need np.expand_dims()
             input_features[sample_count,:] = np.concatenate((np.expand_dims(features_base_train[selected_indexes[0]], 0),
                                                              np.expand_dims(features_base_train[selected_indexes[1]], 0),
-                                                             seed_feature), axis=1)
+                                                             np.expand_dims(seed_features[sample_count], 0)), axis=1)
         
         ### Forward-pass
         features_hallucinated = self.sess.run(self.hallucinated_features,
@@ -292,16 +292,16 @@ class FSL(object):
                                             if np.argmax(labels_novel_train[idx]) == lb]
                 selected_indexes_per_lb = np.random.choice(candidate_indexes_per_lb, n_shot)
                 selected_features_per_lb = features_novel_train[selected_indexes_per_lb]
-                ##### (2) Randomly select a seed feature (from the above n-shot samples) for hallucination
-                seed_index = np.random.choice(selected_indexes_per_lb, 1)
-                seed_feature = features_novel_train[seed_index]
+                ##### (2) Randomly select n_min-n_shot seed features (from the above n-shot samples) for hallucination
+                seed_indexes = np.random.choice(selected_indexes_per_lb, n_min-n_shot, replace=True)
+                seed_features = features_novel_train[seed_indexes]
                 seed_coarse_lb = class_mapping_inv[lb] if class_mapping_inv else None
                 ##### (3) Collect (n_shot) selected features and (n_min - n_shot) hallucinated features
                 if (not coarse_specific) and (not could_load_hal):
                     print('Load hallucinator or mlp linear classifier fail!!!!!!')
-                    feature_hallucinated = np.repeat(seed_feature, n_min-n_shot, axis=0)
+                    feature_hallucinated = seed_features
                 else:
-                    feature_hallucinated = self.hallucinate(seed_feature=seed_feature,
+                    feature_hallucinated = self.hallucinate(seed_features=seed_features,
                                                             seed_coarse_lb=seed_coarse_lb,
                                                             n_samples_needed=n_min-n_shot,
                                                             train_base_path=train_base_path,
