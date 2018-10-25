@@ -162,23 +162,27 @@ class FSL(object):
                     n_samples_needed,
                     train_base_path,
                     coarse_specific,
-                    hal_from):
+                    hal_from,
+                    seed_fine_labels,
+                    similar_lb_dict_base=None):
         #print(" [***] Hallucinator Load SUCCESS")
         ### Load training features and labels of the base classes
         ### (Take the first 80% since the rest are used for validation in the train() function)
+        #### [20181025] Just take all 100% since we are not running validation during FSL training
         train_base_dict = unpickle(train_base_path)
-        features_len = len(train_base_dict[b'fine_labels'])
-        features_base_train = train_base_dict[b'features'][0:int(features_len*0.8)]
-        fine_labels = [int(s) for s in train_base_dict[b'fine_labels'][0:int(features_len*0.8)]]
+        features_base_train = train_base_dict[b'features']
+        fine_labels = [int(s) for s in train_base_dict[b'fine_labels']]
         labels_base_train = np.eye(self.n_fine_class)[fine_labels]
 
         ### Use base classes belonging to the same coarse class (specified by 'seed_coarse_lb') only
         if seed_coarse_lb:
-            coarse_base_train = [int(s) for s in train_base_dict[b'coarse_labels'][0:int(features_len*0.8)]]
+            coarse_base_train = [int(s) for s in train_base_dict[b'coarse_labels']]
             same_coarse_indexes = [idx for idx in range(len(coarse_base_train)) \
                                    if coarse_base_train[idx] == seed_coarse_lb]
             features_base_train = features_base_train[same_coarse_indexes]
             labels_base_train = labels_base_train[same_coarse_indexes]
+            #### Further, we may want to have coarse-specific hallucinators
+            #### [20181025] Not used anymore since worse performance and less general
             if coarse_specific:
                 print('Load hallucinator for coarse label %02d...' % seed_coarse_lb)
                 hal_from_basename = os.path.basename(hal_from)
@@ -194,6 +198,9 @@ class FSL(object):
         for sample_count in range(n_samples_needed):
             #### (1) Randomly select a base class
             lb = np.random.choice(all_possible_base_lbs, 1)
+            #### [spacy] Select a base class from the set of "similar" classes specified by "similar_lb_dict_base", if given
+            if similar_lb_dict_base:
+                lb = np.random.choice(similar_lb_dict_base[seed_fine_labels[sample_count]], 1)
             #### (2) Randomly select two samples from the above base class
             candidate_indexes = [idx for idx in range(labels_base_train.shape[0]) if np.argmax(labels_base_train[idx]) == lb]
             selected_indexes = np.random.choice(candidate_indexes, 2, replace=False)
@@ -221,6 +228,7 @@ class FSL(object):
               hal_from_ckpt=None, ## e.g., hal_name+'.model-1680' (can be None)
               #mlp_from_ckpt=None, ## e.g., mlp_name+'.model-1680' (can be None)
               data_path=None, ## class_mapping path (if None, don't consider coarse labels for hallucination)
+              similar_lb_path=None, ## class_mapping path (if None, don't consider semantic-based label dependencies for hallucination)
               coarse_specific=False, ## if True, use coarse-label-specific hallucinators
               n_shot=1,
               n_min=20, ## minimum number of samples per training class ==> (n_min - n_shot) more samples need to be hallucinated
@@ -238,12 +246,11 @@ class FSL(object):
         
         ### Load training features (as two dictionaries) from both base and novel classes
         train_novel_dict = unpickle(train_novel_path)
-        features_len = len(train_novel_dict[b'fine_labels'])
         features_novel_train = train_novel_dict[b'features']
         fine_labels = [int(s) for s in train_novel_dict[b'fine_labels']]
         labels_novel_train = np.eye(self.n_fine_class)[fine_labels]
         train_base_dict = unpickle(train_base_path)
-        features_len = len(train_base_dict[b'fine_labels'])
+        features_len_base = len(train_base_dict[b'fine_labels'])
         features_base_train = train_base_dict[b'features']
         fine_labels = [int(s) for s in train_base_dict[b'fine_labels']]
         labels_base_train = np.eye(self.n_fine_class)[fine_labels]
@@ -262,6 +269,16 @@ class FSL(object):
                         break
             print('class_mapping_inv:')
             print(class_mapping_inv)
+        
+        if not os.path.exists(os.path.join(similar_lb_path, 'similar_labels')):
+            similar_lb_dict_base = None
+        else:
+            similar_lb_dict = unpickle(os.path.join(similar_lb_path, 'similar_labels'))
+            ### Remove novel labels
+            all_base_labels = set(np.argmax(labels_base_train, axis=1))
+            similar_lb_dict_base = {}
+            for lb in similar_lb_dict:
+                similar_lb_dict_base[lb] = [lb for lb in similar_lb_dict if lb in all_base_labels]
         
         ## load previous trained hallucinator and mlp linear classifier
         if not coarse_specific:
@@ -296,6 +313,9 @@ class FSL(object):
                 seed_indexes = np.random.choice(selected_indexes_per_lb, n_min-n_shot, replace=True)
                 seed_features = features_novel_train[seed_indexes]
                 seed_coarse_lb = class_mapping_inv[lb] if class_mapping_inv else None
+                ##### spacy
+                if similar_lb_dict:
+                    seed_fine_labels = np.argmax(labels_novel_train, axis=1)[seed_indexes]
                 ##### (3) Collect (n_shot) selected features and (n_min - n_shot) hallucinated features
                 if (not coarse_specific) and (not could_load_hal):
                     print('Load hallucinator or mlp linear classifier fail!!!!!!')
@@ -306,36 +326,22 @@ class FSL(object):
                                                             n_samples_needed=n_min-n_shot,
                                                             train_base_path=train_base_path,
                                                             coarse_specific=coarse_specific,
-                                                            hal_from=hal_from)
+                                                            hal_from=hal_from,
+                                                            seed_fine_labels=seed_fine_labels,
+                                                            similar_lb_dict_base=similar_lb_dict_base)
                     print('feature_hallucinated.shape: %s' % (feature_hallucinated.shape,))
                 features_novel_final[lb_counter*n_min:(lb_counter+1)*n_min,:] = \
                     np.concatenate((selected_features_per_lb, feature_hallucinated), axis=0)
                 labels_novel_final[lb_counter*n_min:(lb_counter+1)*n_min,:] = np.eye(self.n_fine_class)[np.repeat(lb, n_min)]
                 lb_counter += 1
         ### Before concatenating the (repeated or hallucinated) novel dataset and the base dataset,
-        ### repeat the novel dataset (500/n_min since each base class only has 80% original samples) to balance novel/base
-        features_novel_balanced = np.repeat(features_novel_final, int(500/n_min), axis=0)
-        labels_novel_balanced = np.repeat(labels_novel_final, int(500/n_min), axis=0)
-        ### Concatenate the novel dataset and the base dataset
-        features_train_ = np.concatenate((features_novel_balanced, features_base_train), axis=0)
-        fine_labels_train_ = np.concatenate((labels_novel_balanced, labels_base_train), axis=0)
+        ### repeat the novel dataset to balance novel/base
+        features_novel_balanced = np.repeat(features_novel_final, int(features_len_base/n_min), axis=0)
+        labels_novel_balanced = np.repeat(labels_novel_final, int(features_len_base/n_min), axis=0)
         
-        ### Before spliting training/validation, shuffle the whole dataset
-        arr = np.arange(features_train_.shape[0])
-        np.random.shuffle(arr)
-        features_train_ = features_train_[arr]
-        fine_labels_train_ = fine_labels_train_[arr]
-        print('features_train_.shape: %s' % (features_train_.shape,))
-        print('fine_labels_train_.shape: %s' % (fine_labels_train_.shape,))
-
-        ### After hallucination and balancing, split final training data into training/validation by 80/20
-        features_len = features_train_.shape[0]
-        features_train = features_train_[0:int(features_len*0.8)]
-        features_valid = features_train_[int(features_len*0.8):int(features_len)]
-        fine_labels_train = fine_labels_train_[0:int(features_len*0.8)]
-        fine_labels_valid = fine_labels_train_[int(features_len*0.8):int(features_len)]
-        nBatches = int(np.ceil(features_train.shape[0] / bsize))
-        nBatches_valid = int(np.ceil(features_valid.shape[0] / bsize))
+        ### [20181025] We are not running validation during FSL training since it is meaningless
+        features_train = np.concatenate((features_novel_balanced, features_base_train), axis=0)
+        fine_labels_train = np.concatenate((labels_novel_balanced, labels_base_train), axis=0)
         print('features_train.shape: %s' % (features_train.shape,))
         print('features_valid.shape: %s' % (features_valid.shape,))
         
@@ -381,57 +387,21 @@ class FSL(object):
                 acc_train_batch.append(accuracy_score(y_true, y_pred))
                 best_n = np.argsort(logits, axis=1)[:,-n_top:]
                 top_n_acc_train_batch.append(np.mean([(y_true[batch_idx] in best_n[batch_idx]) for batch_idx in range(len(y_true))]))
-            ### compute validation loss
-            #print('validation')
-            for idx in tqdm.tqdm(range(nBatches_valid)):
-                batch_features = features_valid[idx*bsize:(idx+1)*bsize]
-                batch_labels = fine_labels_valid[idx*bsize:(idx+1)*bsize]
-                #print(batch_labels.shape)
-                loss, logits = self.sess.run([self.loss, self.logits],
-                                             feed_dict={self.features: batch_features,
-                                                        self.fine_labels: batch_labels,
-                                                        self.bn_train: False,
-                                                        self.keep_prob: 1.0,})
-                loss_valid_batch.append(loss)
-                y_true = np.argmax(batch_labels, axis=1)
-                y_pred = np.argmax(logits, axis=1)
-                acc_valid_batch.append(accuracy_score(y_true, y_pred))
-                best_n = np.argsort(logits, axis=1)[:,-n_top:]
-                top_n_acc_valid_batch.append(np.mean([(y_true[batch_idx] in best_n[batch_idx]) for batch_idx in range(len(y_true))]))
+            ### [20181025] We are not running validation during FSL training since it is meaningless
             ### record training loss for each epoch (instead of each iteration)
             loss_train.append(np.mean(loss_train_batch))
-            loss_valid.append(np.mean(loss_valid_batch))
             acc_train.append(np.mean(acc_train_batch))
-            acc_valid.append(np.mean(acc_valid_batch))
             top_n_acc_train.append(np.mean(top_n_acc_train_batch))
-            top_n_acc_valid.append(np.mean(top_n_acc_valid_batch))
-            print('Epoch: %d, train loss: %f, valid loss: %f, train accuracy: %f, valid accuracy: %f' % \
-                  (epoch, np.mean(loss_train_batch), np.mean(loss_valid_batch), np.mean(acc_train_batch), np.mean(acc_valid_batch)))
-            print('           top-%d train accuracy: %f, top-%d valid accuracy: %f' % \
-                  (n_top, np.mean(top_n_acc_train_batch), n_top, np.mean(top_n_acc_valid_batch)))
-            
-            ### save model if improvement, stop if reach patience
-            current_loss = np.mean(loss_valid_batch)
-            current_acc = np.mean(acc_valid_batch)
-            if epoch == 1:
-                best_loss = current_loss
-                best_acc = current_acc
-            else:
-                #if current_loss < best_loss or current_acc > best_acc:
-                if current_loss < best_loss: ## only monitor loss
-                    best_loss = current_loss
-                    best_acc = current_acc
-                    self.saver.save(self.sess,
-                                    os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
-                                    global_step=epoch)
-                    stopping_step = 0
-                else:
-                    stopping_step += 1
-                print('stopping_step = %d' % stopping_step)
-                if stopping_step >= patience:
-                    print('stopping_step >= patience (%d), stop training' % patience)
-                    break
-        return [loss_train, loss_valid, acc_train, acc_valid]
+            print('Epoch: %d, train loss: %f, train accuracy: %f, top-%d train accuracy: %f' % \
+                  (epoch, np.mean(loss_train_batch), np.mean(acc_train_batch), n_top, np.mean(top_n_acc_valid_batch)))
+        
+        ## [20181025] We are not running validation during FSL training since it is meaningless.
+        ## Just save the final model
+        self.saver.save(self.sess,
+                        os.path.join(self.result_path, self.model_name, 'models', self.model_name + '.model'),
+                        global_step=epoch)
+        
+        return [loss_train, acc_train]
     
     def inference(self,
                   test_novel_path, ## test_novel_feat path (must be specified!)
