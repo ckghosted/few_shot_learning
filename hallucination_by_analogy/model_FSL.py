@@ -262,7 +262,7 @@ class FSL(object):
                         break
             print('class_mapping_inv:')
             print(class_mapping_inv)
-
+        
         ## load previous trained hallucinator and mlp linear classifier
         if not coarse_specific:
             could_load_hal, checkpoint_counter_hal = self.load_hal(hal_from, hal_from_ckpt)
@@ -541,3 +541,116 @@ class FSL(object):
         else:
             print(" [*] Failed to find a checkpoint")
             return False, 0
+
+class FSL_T(FSL):
+    def __init__(self,
+                 sess,
+                 model_name='FSL',
+                 result_path='/home/cclin/few_shot_learning/hallucination_by_analogy/results',
+                 fc_dim=512,
+                 n_fine_class=100,
+                 bnDecay=0.9,
+                 epsilon=1e-5,
+                 l2scale=0.001):
+        super(FSL_T, self).__init__(sess,
+                                    model_name,
+                                    result_path,
+                                    fc_dim,
+                                    n_fine_class,
+                                    bnDecay,
+                                    epsilon,
+                                    l2scale)
+    
+    def build_model(self):
+        self.features = tf.placeholder(tf.float32, shape=[None]+[self.fc_dim], name='features')
+        self.coarse_labels = tf.placeholder(tf.float32, shape=[None], name='coarse_labels')
+        self.fine_labels = tf.placeholder(tf.float32, shape=[None]+[self.n_fine_class], name='fine_labels')
+        self.bn_train = tf.placeholder('bool', name='bn_train')
+        self.keep_prob = tf.placeholder(tf.float32, shape=[], name='keep_prob')
+        self.learning_rate = tf.placeholder(tf.float32, shape=[], name='learning_rate')
+        
+        ### Used the classifier on the base classes learnt during representation learning
+        ### to compute the probability of the correct fine_label of hallucinated features.
+        #self.bn_dense14 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='bn_dense14')
+        #self.bn_dense15 = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='bn_dense15')
+        ### The classifier is implemented as a simple 3-layer MLP with batch normalization.
+        ### Just like the one used in the VGG feature extractor. But it can be re-designed.
+        self.bn_dense14_ = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='bn_dense14_')
+        self.bn_dense15_ = batch_norm(epsilon=self.epsilon, momentum=self.bnDecay, name='bn_dense15_')
+        print("build model started")
+        self.logits = self.build_fsl_classifier(self.features)
+        ### Also build the mlp.
+        ### No need to define loss or optimizer since we only need foward-pass
+        #self.features_temp = tf.placeholder(tf.float32, shape=[None]+[self.fc_dim], name='features_temp')
+        #self.logits_temp = self.build_mlp(self.features_temp)
+        ### Also build the hallucinator.
+        ### No need to define loss or optimizer since we only need foward-pass
+        self.triplet_features = tf.placeholder(tf.float32, shape=[None]+[self.fc_dim*3], name='triplet_features')
+        ### Split self.triplet_features into the first two feature vectors and the last feature vector
+        self.tran_code = self.build_tran_extractor(self.triplet_features[:,0:int(self.fc_dim*2)])
+        self.input_with_code = tf.concat([self.tran_code, self.triplet_features[:,int(self.fc_dim*2):int(self.fc_dim*3)]], axis=1)
+        self.hallucinated_features = self.build_hallucinator(self.input_with_code)
+        print("build model finished, define loss and optimizer")
+        
+        ### Compute accuracy (optional)
+        #self.outputs = tf.nn.softmax(self.dense16) ## [-1,self.n_fine_class]
+        #self.pred = tf.argmax(self.outputs, axis=1) ## [-1,1]
+        #self.acc = tf.reduce_mean(tf.cast(tf.equal(self.pred, self.fine_labels), tf.float32))
+        
+        ### Define loss and training ops
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.fine_labels,
+                                                                           logits=self.logits,
+                                                                           name='loss'))
+        
+        ### variables
+        self.all_vars = tf.global_variables()
+        self.all_vars_hal = [var for var in self.all_vars if 'hal' in var.name]
+        #self.all_vars_mlp = [var for var in self.all_vars if 'mlp' in var.name]
+        self.all_vars_fsl_cls = [var for var in self.all_vars if 'fsl_cls' in var.name]
+        self.trainable_vars = tf.trainable_variables()
+        self.trainable_vars_fsl_cls = [var for var in self.trainable_vars if 'fsl_cls' in var.name]
+        
+        ### regularizers
+        self.all_regs = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        self.used_regs = [reg for reg in self.all_regs if \
+                          ('filter' in reg.name) or ('Matrix' in reg.name) or ('bias' in reg.name)]
+        self.used_regs_fsl_cls = [reg for reg in self.all_regs if \
+                                  ('fsl_cls' in reg.name) and (('Matrix' in reg.name) or ('bias' in reg.name))]
+        
+        ### optimizers
+        self.opt_fsl_cls = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+                                                  beta1=0.5).minimize(self.loss+sum(self.used_regs_fsl_cls),
+                                                                      var_list=self.trainable_vars_fsl_cls)
+        #self.opt_all = tf.train.AdamOptimizer(learning_rate=self.learning_rate,
+        #                                      beta1=0.5).minimize(self.loss+sum(self.used_regs),
+        #                                                          var_list=self.trainable_vars)
+        
+        ### Create model saver (keep the best 3 checkpoint)
+        self.saver = tf.train.Saver(max_to_keep = 1)
+        self.saver_hal = tf.train.Saver(var_list = self.all_vars_hal,
+                                        max_to_keep = 1)
+        #self.saver_mlp = tf.train.Saver(var_list = self.all_vars_mlp,
+        #                                max_to_keep = 1)
+        return [self.all_vars, self.trainable_vars, self.all_regs]
+
+    ## "For our generator G, we use a three layer MLP with ReLU as the activation function" (Hariharan, 2017)
+    def build_hallucinator(self, input_):
+        with tf.variable_scope('hal', regularizer=l2_regularizer(self.l2scale)):
+            ### Layer 1: dense with self.fc_dim neurons, ReLU
+            self.dense3 = linear(input_, self.fc_dim, add_bias=True, name='dense3') ## [-1,self.fc_dim]
+            self.relu3 = tf.nn.relu(self.dense3, name='relu3')
+            ### Layer 2: dense with self.fc_dim neurons, ReLU
+            self.dense4 = linear(self.relu3, self.fc_dim, add_bias=True, name='dense4') ## [-1,self.fc_dim]
+            self.relu4 = tf.nn.relu(self.dense4, name='relu4')
+        return self.relu4
+    
+    ## Transformation extractor
+    def build_tran_extractor(self, input_, reuse=False):
+        with tf.variable_scope('hal', reuse=reuse, regularizer=l2_regularizer(self.l2scale)):
+            ### Layer 1: dense with self.fc_dim neurons, ReLU
+            self.dense1 = linear(input_, self.fc_dim//2, add_bias=True, name='dense1') ## [-1,self.fc_dim//2] (e.g., 256)
+            self.relu1 = tf.nn.relu(self.dense1, name='relu1')
+            ### Layer 2: dense with self.fc_dim neurons, ReLU
+            self.dense2 = linear(self.relu1, self.fc_dim//8, add_bias=True, name='dense2') ## [-1,self.fc_dim//8] (e.g., 64)
+            self.relu2 = tf.nn.relu(self.dense2, name='relu2')
+        return self.relu2
